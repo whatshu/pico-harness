@@ -1,6 +1,6 @@
 # PicoHarness Work Core library
 
-[底座入门：构建、四个示例、Logic 和 GDB](GETTING_STARTED.md)
+[底座入门：构建、四个示例、Logic 和 GDB](getting-started.md)
 
 Use the Pico SDK's official `external/pico_sdk_import.cmake`, call
 `pico_sdk_init()`, then add this directory and link `pico_harness`:
@@ -60,7 +60,7 @@ using the communication library belong in `example/`; standalone test firmware b
 | `example/harness-terminal` | Console REPL: help/led/gpio/pwm/uart/adc/info/sleep/reboot |
 | `example/harness-signals` | Console echo, periodic UART traffic, GP5 10 kHz / 35% PWM |
 
-The plain [blink](../test/blink) and [UART echo](../test/uart-console)
+The plain [blink](firmware/test/blink) and [UART echo](firmware/test/uart-console)
 fixtures live in `firmware/test/` and do not use this library.
 
 `harness-terminal` is a MicroPython-style REPL over the harness console: `led

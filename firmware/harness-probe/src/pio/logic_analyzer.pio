@@ -1,6 +1,6 @@
 ; SPDX-License-Identifier: GPL-3.0-only
 ; Adapted 2026-09-21 from gusmanb/logicanalyzer, LogicAnalyzer.pio.
-; See LOGIC_ANALYZER.md and LICENSE-GPL-3.0 in the firmware directory.
+; See doc/probe-logic-analyzer.md and LICENSE-GPL-3.0 in the firmware directory.
 ; Edge capture keeps a quarter-window of history in a DMA ring. All sampling
 ; paths take four PIO cycles, including both edge-detector branches.
 .program la_counted

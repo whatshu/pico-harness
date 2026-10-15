@@ -7,7 +7,7 @@ Retrieved 2026-09-21 from `master/Firmware/LogicAnalyzer/LogicAnalyzer.pio`
 The upstream file's SHA-256 is recorded below so the adapter is tied to exact
 source content rather than a moving branch.
 
-`src/pio/logic_analyzer.pio` and `src/logic_analyzer.c` adapt the simple positive /
+`firmware/harness-probe/src/pio/logic_analyzer.pio` and `firmware/harness-probe/src/logic_analyzer.c` adapt the simple positive /
 negative capture post-trigger loop and PIO/DMA configuration. Changes on
 2026-09-21: carrier pin mapping, exclusive PIO1 allocation, finite DMA buffer,
 polled completion, bounded trigger wait, joined RX FIFO, selectable input
@@ -34,7 +34,7 @@ initial `history / sample_hz` interval before sending a test signal.
 bits 16–31 report the first guaranteed post-trigger sample index. The desktop
 uses that index for its `T` marker.
 
-The upstream license is GPL-3.0 (see LICENSE-GPL-3.0). These adapted source files and
+The upstream license is GPL-3.0 (see firmware/harness-probe/LICENSE-GPL-3.0). These adapted source files and
 the combined dualcore firmware containing them are distributed under GPL-3.0-only.
 Existing MIT, BSD and Apache notices on other components remain applicable.
 Corresponding source and build instructions are in this repository. FreeRTOS
@@ -44,7 +44,7 @@ distribute UF2 files without the corresponding source and license notices.
 
 Upstream SHA-256: `3a992a2e86612756e42fefb0668acc9b9c4c0538d4f9c77f86fa7f410fcb04aa`
 
-The checked-in `src/logic_analyzer.c`, `src/inc/logic_analyzer.h` and
-`src/pio/logic_analyzer.pio` are the small adapted portion used by this firmware.
+The checked-in `firmware/harness-probe/src/logic_analyzer.c`, `firmware/harness-probe/src/inc/logic_analyzer.h` and
+`firmware/harness-probe/src/pio/logic_analyzer.pio` are the small adapted portion used by this firmware.
 They are intentionally kept with the project adapter because no other upstream
 files are required at runtime.

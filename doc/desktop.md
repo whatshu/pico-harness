@@ -28,7 +28,7 @@ available because winit 0.30's native Wayland backend does not deliver file drop
 
 The device sidebar starts collapsed; no demo data or invented observations are
 shown. Plain UART firmware remains supported, but coordinated baud changes and
-SPI bulk require the [Work library](../firmware/harness-target/README.md).
+SPI bulk require the [Work library](work-library.md).
 
 Page tabs show `[1]`–`[6]`: **Ctrl+1** Overview, **Ctrl+2** Console, **Ctrl+3** SWD,
 **Ctrl+4** GDB, **Ctrl+5** Logic, **Ctrl+6** Firmware. **Ctrl+Tab** advances and
@@ -131,7 +131,7 @@ An existing external server retains its own target configuration.
 
 Console's Hardware, UART and SPI status icons distinguish responding hardware,
 verified Work protocol and pending SPI bulk data; hover for the full details. PWM belongs to Logic. See the
-[example walkthrough](../firmware/harness-target/GETTING_STARTED.md).
+[example walkthrough](getting-started.md).
 
 Closing or reconnecting stops bulk/memory operations between chunks and marks
 unfinished transfers cancelled. A baud transaction completes its verified
@@ -148,9 +148,9 @@ cargo build --manifest-path desktop/Cargo.toml -p picoharness-desktop
 ```
 
 Native CPU/memory and frame-time tests, including saturated Console, full history
-and dense logic captures, are documented in [PERFORMANCE.md](PERFORMANCE.md).
+and dense logic captures, are documented in [desktop-testing.md](desktop-testing.md).
 Headless tests of real page controls, focus, shortcuts and alignment use
-egui_kittest / AccessKit; see [GUI_TESTING.md](GUI_TESTING.md).
+egui_kittest / AccessKit; see [desktop-testing.md](desktop-testing.md).
 
 Hardware tests are opt-in. Work flash tests require `PDBG_FLASH_TEST_IMAGE`,
 `PDBG_PROBE_SERIAL`, and `PDBG_FLASH_TARGET`; Debug updates require

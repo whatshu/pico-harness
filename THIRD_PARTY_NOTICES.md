@@ -5,8 +5,8 @@ for imported or derived files.
 
 | Component | License / source |
 | --- | --- |
-| Raspberry Pi Debug Probe | MIT; `firmware/harness-probe/LICENSE` and `UPSTREAM.md` |
-| gusmanb LogicAnalyzer sampler | GPL-3.0-only; `firmware/harness-probe/LOGIC_ANALYZER.md` |
+| Raspberry Pi Debug Probe | MIT; `firmware/harness-probe/LICENSE` and [`doc/probe-upstream.md`](doc/probe-upstream.md) |
+| gusmanb LogicAnalyzer sampler | GPL-3.0-only; [`doc/probe-logic-analyzer.md`](doc/probe-logic-analyzer.md) |
 | CMSIS-DAP | Apache-2.0; `third_party/cmsis-dap/LICENSE` |
 | FreeRTOS Kernel | MIT; `third_party/FreeRTOS-Kernel/LICENSE.md` |
 | KiCad schematic API | See `third_party/kicad-sch-api/LICENSE` |

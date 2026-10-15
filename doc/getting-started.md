@@ -172,7 +172,7 @@ machine and two DMA channels. PWM GP5 is a choice made by the signals example;
 the library does not reserve it automatically. Call `pico_harness_poll()` to
 keep the queue and protocol moving, keep callbacks short, and retry
 `pico_harness_write()` later when it returns false. The API, queue sizes and
-performance limits are in [README](README.md).
+performance limits are in [work-library](work-library.md).
 
 Reproducible hardware-sampling checks (run `harness-signals` first and keep
 Work powered):

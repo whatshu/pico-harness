@@ -22,8 +22,6 @@ __pycache__/
 # Editors and operating systems
 .idea/
 .vscode/
-!firmware/harness-probe/.vscode/
-!firmware/harness-probe/.vscode/**
 .DS_Store
 .serial_mcp
 

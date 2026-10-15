@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Adapted 2026-09-21 from gusmanb/logicanalyzer's startCaptureSimple and
- * configureCaptureDMAs. See LOGIC_ANALYZER.md for attribution and license.
+ * configureCaptureDMAs. See doc/probe-logic-analyzer.md for attribution and license.
  * PIO/DMA owns sampling timing; core 1 polls completion without any IRQ.
  */
 
