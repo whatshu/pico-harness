@@ -52,7 +52,7 @@ build_debug() {
   (cd "$artifacts" && sha256sum "$name.uf2" "$name.elf" > SHA256SUMS)
   cat > "$artifacts/build-info.yaml" <<EOF2
 boards: [pico_dualcore_pico]
-hardware: pcb/dualcore
+hardware: pcb/pico-dualcore-devboard-v1.2
 version: "$version"
 source: "$(git -C "$root_dir" describe --always --tags --dirty 2>/dev/null || echo unknown)"
 built_at: "$(date -Iseconds)"

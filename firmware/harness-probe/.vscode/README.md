@@ -2,7 +2,7 @@
 
 The workspace root must be `firmware/harness-probe` (the directory holding this
 `.vscode`). The project supports exactly the two Debug Core targets of
-`pcb/dualcore`: `pico_dualcore` (Pico 2) and `pico_dualcore_pico` (RP2040).
+`pcb/pico-dualcore-devboard-v1.2`: `pico_dualcore` (Pico 2) and `pico_dualcore_pico` (RP2040).
 
 ## Division of labour
 
