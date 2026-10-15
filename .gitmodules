@@ -1,0 +1,6 @@
+[submodule "third_party/FreeRTOS-Kernel"]
+	path = third_party/FreeRTOS-Kernel
+	url = https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+[submodule "third_party/kicad-sch-api"]
+	path = third_party/kicad-sch-api
+	url = https://github.com/circuit-synth/kicad-sch-api.git

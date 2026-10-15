@@ -1,0 +1,53 @@
+; SPDX-License-Identifier: GPL-3.0-only
+; Adapted 2026-09-21 from gusmanb/logicanalyzer, LogicAnalyzer.pio.
+; See LOGIC_ANALYZER.md and LICENSE-GPL-3.0 in the firmware directory.
+; Edge capture keeps a quarter-window of history in a DMA ring. All sampling
+; paths take four PIO cycles, including both edge-detector branches.
+.program la_counted
+    pull block
+    out x, 32
+    pull block
+    out y, 32
+prime:
+    in pins, 32
+    jmp y-- prime [2]
+.wrap_target
+arm:
+    in pins, 32
+    jmp pin arm_high [1]
+arm_low:
+    jmp edge                ; patched for falling edge
+arm_high:
+    jmp arm                 ; patched for falling edge
+edge:
+    in pins, 32
+    jmp pin edge_high [1]
+edge_low:
+    jmp edge                ; patched for falling edge
+edge_high:
+    jmp sample              ; patched for falling edge
+sample:
+    in pins, 32
+    jmp x-- sample [2]
+    irq 0
+stop:
+    jmp stop
+.wrap
+
+% c-sdk {
+enum {
+    la_counted_arm = 6,
+    la_counted_arm_low = 8,
+    la_counted_arm_high = 9,
+    la_counted_edge = 10,
+    la_counted_edge_low = 12,
+    la_counted_edge_high = 13,
+    la_counted_sample = 14,
+};
+%}
+
+; Immediate burst extension: DMA defines capture length, one cycle/sample.
+.program la_burst
+.wrap_target
+    in pins, 32
+.wrap

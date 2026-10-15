@@ -1,0 +1,37 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug dualcore — Pico 2 core",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "external",
+      "gdbTarget": "localhost:3333",
+      "gdbPath": "gdb-multiarch",
+      "executable": "${workspaceFolder}/../../BUILD/harness-probe-pico2/pico_dualcore_debug_pico2.elf",
+      "cwd": "${workspaceFolder}",
+      "runToEntryPoint": "main",
+      "targetProcessor": "cortex-m33",
+      "svdFile": "${env:PICO_SDK_PATH}/src/rp2350/hardware_regs/RP2350.svd",
+      "preLaunchTask": "Debug: start OpenOCD (local)",
+      "postDebugTask": "Debug: stop OpenOCD (local)",
+      "showDevDebugOutput": "none"
+    },
+    {
+      "name": "Debug dualcore — Pico core (RP2040)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "external",
+      "gdbTarget": "localhost:3333",
+      "gdbPath": "gdb-multiarch",
+      "executable": "${workspaceFolder}/../../BUILD/harness-probe-pico/pico_dualcore_debug_pico.elf",
+      "cwd": "${workspaceFolder}",
+      "runToEntryPoint": "main",
+      "targetProcessor": "cortex-m0+",
+      "svdFile": "${env:PICO_SDK_PATH}/src/rp2040/hardware_regs/RP2040.svd",
+      "preLaunchTask": "Debug: start OpenOCD (local)",
+      "postDebugTask": "Debug: stop OpenOCD (local)",
+      "showDevDebugOutput": "none"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+; SPDX-License-Identifier: MIT
+; Work SPI slave: SCK18, MISO19, MOSI20, CS21.
+.program harness_spi_slave
+.wrap_target
+    wait 0 gpio 21
+    set x, 7
+bitloop:
+    wait 0 gpio 18
+    out pins, 1
+    wait 1 gpio 18
+    in pins, 1
+    jmp x-- bitloop
+.wrap

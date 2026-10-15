@@ -1,0 +1,23 @@
+[package]
+name = "picoharness-desktop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "picoharness-desktop"
+
+[features]
+ui-perf = []
+
+[dependencies]
+eframe = "0.31"
+device_control = { path = "../device_control" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+egui_kittest = { version = "0.31.1", features = ["eframe"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30", default-features = false, features = ["x11"] }

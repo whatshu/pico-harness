@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+# 本仓库没有一个顶层 CMake 项目：pico_harness 库由各个 example/*/CMakeLists.txt
+# 作为 add_subdirectory 子目录构建。clangd 需要一个 compile_commands.json，
+# 这里直接指向 example/harness-console 的构建目录 —— 该数据库里包含
+# src/pico_harness.c 和 src/spi_link.c 的编译条目（含 SDK、PIO 生成头的 include）,
+# 各示例对库的编译选项一致，因此其余示例源码也能获得正确的补全和诊断。
+#
+# 重新生成（构建目录已 gitignore，换机器/删构建目录后需要重建）：
+#   VS Code 命令面板 -> Tasks: Run Task -> "clangd: 重新生成 compile_commands.json"
+#   或手动：
+#   PICO_SDK_PATH=/path/to/pico-sdk cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+#       -S example/harness-console -B example/harness-console/build
+# 改完建议运行 "clangd: Restart language server" 使 clangd 重新加载数据库。
+CompileFlags:
+  # 编译数据库所在的目录（相对本 .clangd 文件路径）。
+  CompilationDatabase: example/harness-console/build
+  # 数据库中不存在条目的文件（例如宿主机侧 test/ 下的回归源码）使用兜底 include。
+  Add:
+    - "-Iinclude"
+    - "-Itest"

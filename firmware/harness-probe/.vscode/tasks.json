@@ -1,0 +1,154 @@
+{
+  "version": "2.0.0",
+  "presentation": {
+    "echo": true,
+    "reveal": "always",
+    "focus": false,
+    "panel": "shared",
+    "showReuseMessage": true,
+    "clear": false
+  },
+  "tasks": [
+    {
+      "label": "Analysis: configure dualcore Pico 2",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "set -e\nsdk=\"${env:PICO_SDK_PATH}\"\ntest -f \"$sdk/pico_sdk_init.cmake\" || { echo \"PICO_SDK_PATH is not set to a Pico SDK\" >&2; exit 1; }\nroot=\"${workspaceFolder}/../..\"\nboard=pico_dualcore\nout=\"$root/BUILD/analysis/$board\"\nif [[ -d \"$out\" ]]; then cmake -E remove_directory \"$out\"; fi\ncmake -S \"${workspaceFolder}\" -B \"$out\" -G Ninja \\\n  -DPICO_SDK_PATH=\"$sdk\" \\\n  -DPICO_BOARD=$board \\\n  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\ncmake --build \"$out\" --target harness-probe\nln -sfn \"$out\" \"${workspaceFolder}/build\"\necho \"==> compile_commands.json: ${workspaceFolder}/build/compile_commands.json\"",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Analysis: configure dualcore Pico",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "set -e\nsdk=\"${env:PICO_SDK_PATH}\"\ntest -f \"$sdk/pico_sdk_init.cmake\" || { echo \"PICO_SDK_PATH is not set to a Pico SDK\" >&2; exit 1; }\nroot=\"${workspaceFolder}/../..\"\nboard=pico_dualcore_pico\nout=\"$root/BUILD/analysis/$board\"\nif [[ -d \"$out\" ]]; then cmake -E remove_directory \"$out\"; fi\ncmake -S \"${workspaceFolder}\" -B \"$out\" -G Ninja \\\n  -DPICO_SDK_PATH=\"$sdk\" \\\n  -DPICO_BOARD=$board \\\n  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\ncmake --build \"$out\" --target harness-probe\nln -sfn \"$out\" \"${workspaceFolder}/build\"\necho \"==> compile_commands.json: ${workspaceFolder}/build/compile_commands.json\"",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Analysis: switch active board",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "set -e\nboard=${input:analysisBoard}\nroot=\"${workspaceFolder}/../..\"\nout=\"$root/BUILD/analysis/$board\"\nif [[ ! -f \"$out/compile_commands.json\" ]]; then\n  echo \"==> 该板卡还没配置过，请先运行对应的 Analysis: configure 任务\" >&2\n  exit 1\nfi\nln -sfn \"$out\" \"${workspaceFolder}/build\"\necho \"==> clangd DB 切换为: $board （在命令面板运行 clangd: Restart language server 使其生效）\"",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build: dualcore Debug Core images",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "group": "build",
+      "command": "./build.sh build-debug",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Build: full firmware suite",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "group": "build",
+      "command": "./build.sh build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Test: host and dualcore checks",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "./build.sh test",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Flash: dualcore Pico 2 core",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "picotool load -x -v RELEASE/artifacts/pico_dualcore_debug_pico2.uf2",
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash: dualcore Pico core",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "picotool load -x -v RELEASE/artifacts/pico_dualcore_debug_pico.uf2",
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash: Work self-test",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "picotool load -x -v RELEASE/artifacts/work_selftest.uf2",
+      "problemMatcher": []
+    },
+    {
+      "label": "Debug: start OpenOCD (local)",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "script/openocd-rp2350.sh -c init",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "openocd",
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "Info : Listening on port 3333 for gdb connections"
+        },
+        "pattern": [
+          {
+            "regexp": ".*",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "message": 4
+          }
+        ]
+      }
+    },
+    {
+      "label": "Debug: stop OpenOCD (local)",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}/../..",
+        "shell": { "executable": "/bin/bash" }
+      },
+      "command": "pkill -f '[o]penocd.*target/rp2350.cfg' || true",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "analysisBoard",
+      "type": "pickString",
+      "description": "选择 clangd 使用的板卡 (compile_commands.json)",
+      "options": [
+        "pico_dualcore",
+        "pico_dualcore_pico"
+      ],
+      "default": "pico_dualcore"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  // 项目推荐的 VS Code 扩展。
+  // clangd 为唯一 C/C++ IntelliSense 引擎（已禁用 ms-vscode.cpptools）。
+  "recommendations": [
+    "llvm-vs-code-extensions.vscode-clangd",
+    "marus25.cortex-debug"
+  ],
+  "unwantedRecommendations": [
+    "ms-vscode.cpptools"
+  ]
+}
