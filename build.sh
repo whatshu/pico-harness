@@ -88,38 +88,24 @@ run_test_suite() {
     "$build_dir/work-selftest/work_selftest_ram.elf" "$test_dir/" || return
   (cd "$test_dir" && sha256sum work_selftest.uf2 work_selftest.elf \
     work_selftest_ram.elf > SHA256SUMS) || return
-  PYTHONPATH="$root_dir/host" python3 -m pdbg.worktest_runner \
-    --elf "$test_dir/work_selftest_ram.elf" \
-    --flash-elf "$test_dir/work_selftest.elf" \
-    --uf2 "$test_dir/work_selftest.uf2" \
-    --output "$test_dir/results.json" --validate-only || return
-  [[ "$hardware_mode" == offline ]] && { echo "Work hardware test skipped: offline mode"; return; }
-  require_command "${PDBG_OPENOCD:-openocd}" || return
-  local args=()
-  [[ -n "${PDBG_SERIAL:-}" ]] && args+=(--serial "$PDBG_SERIAL")
-  [[ "$hardware_mode" == required ]] && args+=(--require-hardware)
-  PYTHONPATH="$root_dir/host" python3 -m pdbg.worktest_runner \
-    --elf "$test_dir/work_selftest_ram.elf" \
-    --flash-elf "$test_dir/work_selftest.elf" \
-    --uf2 "$test_dir/work_selftest.uf2" \
-    --output "$test_dir/results.json" \
-    --openocd-script "$root_dir/script/openocd-rp2040.sh" "${args[@]}"
+  echo "Work fixtures built; hardware work self-test superseded by the PH"
+  echo "device integration suite (host/tests/test_ph_device.py)."
 }
+
 
 flash_debug() {
   require_command python3 || return
   require_command "${PICOTOOL:-picotool}" || return
-  local args=()
-  [[ -n "${PDBG_SERIAL:-}" ]] && args+=(--serial "$PDBG_SERIAL")
-  PYTHONPATH="$root_dir/host" python3 -m pdbg.cli "${args[@]}" flash \
-    --artifacts "$release_dir/artifacts" --picotool "${PICOTOOL:-picotool}"
+  local uf2
+  uf2="$(ls "$build_dir"/pico_dualcore_debug_*.uf2 2>/dev/null | head -1)"
+  [[ -n "$uf2" ]] || uf2="$(ls "$release_dir"/artifacts/pico_dualcore_debug_*.uf2 2>/dev/null | head -1)"
+  [[ -n "$uf2" ]] || { echo "no debug UF2 built ($build_dir/pico_dualcore_debug_*.uf2)"; return 1; }
+  PICOTOOL="${PICOTOOL:-picotool}" PYTHONPATH="$root_dir/host" python3 -m phbridge flash "$uf2"
 }
 
 monitor_debug() {
-  require_command python3 || return
-  local args=()
-  [[ -n "${PDBG_SERIAL:-}" ]] && args+=(--serial "$PDBG_SERIAL")
-  PYTHONPATH="$root_dir/host" python3 -m pdbg.cli "${args[@]}" monitor "$@"
+  echo "monitor: retired with the PDBG wire protocol; use the WORK console"
+  echo "over the PH Terminal instead: ph console read"
 }
 
 run_ci() {

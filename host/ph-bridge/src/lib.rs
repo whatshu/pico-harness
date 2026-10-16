@@ -17,6 +17,9 @@ pub mod device;
 pub mod framing;
 pub mod msg;
 
+#[cfg(feature = "python")]
+pub mod python;
+
 pub use bulk::BulkWriter;
 pub use client::{PhClient, PhError};
 pub use msg::{GetInfo, GetStatus, Measure, PhMessage, Status};

@@ -14,4 +14,4 @@ root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 exec env \
   PYTHONPATH="$root_dir/host${PYTHONPATH:+:$PYTHONPATH}" \
-  python3 -m pdbg.cli "$@"
+  python3 -m phbridge "$@"

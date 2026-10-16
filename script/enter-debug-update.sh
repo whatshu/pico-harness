@@ -35,5 +35,4 @@ if [[ -n "$serial" ]]; then
   args+=(--serial "$serial")
 fi
 
-PYTHONPATH="$root_dir/host" python3 -m pdbg.cli "${args[@]}" \
-  update "$uf2" --picotool "$picotool"
+PICOTOOL="$picotool" PYTHONPATH="$root_dir/host" python3 -m phbridge flash "$uf2"
