@@ -122,7 +122,7 @@ P1 已完成并实机验证(RP2040 Debug core,`/dev/ttyACM*` + pyusb 实测):
 | --- | --- | --- |
 | P1 固件 | USB 拓扑(IF0 DAP / IF1-2 CDC PH Terminal / IF3 vendor FF/50/01 / IF4-5 CDC LA)、PH 协议 protobuf(nanopb)、control+terminal 消息、bulk `DEBUG` 路由(载荷接收 + CRC) | ✅ 完成,实机 13 项通过 |
 | P1 host | `host/ph-bridge`(prost + framing + `PhClient`)、`host/phbridge`(python)、`host/tests` 离线+实机测试、`build.sh test` 接入 | ✅ 完成,`./build.sh test --offline` 绿 |
-| P2 控制台桥 | console 的 pico_harness 模式(Hello 发现、`0x02` 帧化、波特率事务)、bulk `WORK_SPI` 转发 | ⬜ |
+| P2 控制台桥 | console 的 pico_harness 模式(Hello 发现、`0x02` 帧化、`0x90` 事件)+ `ph` CLI;波特率事务 ⚠(见下);bulk `WORK_SPI` 转发归 P3 | 🔶 console 已实机验证;**波特率切率事务仍失败,待调** |
 | P3 LA | CDC2 SUMP(libsigrok `ols`)、PulseView 验证 | ⬜ |
 | P4 desktop | desktop 切 `ph_bridge`、`device_control` 提取、`host/pdbg` 退役、PyO3 绑定 | ⬜ |
 | P5 改名 | 全仓 `ph_<子前缀>_` 统一 | ⬜(新代码已按 `ph_`) |
