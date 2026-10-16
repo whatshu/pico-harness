@@ -85,7 +85,10 @@ static void handle_run(void)
 {
     if (sump_req || sump_streaming || sump_done || la_busy())
         return; /* busy */
-    uint32_t hz = clock_get_hz(clk_sys) / (reg_divider + 1u);
+    /* SUMP dividers follow the OLS convention with a 100 MHz reference; the
+     * libsigrok ols driver computes divider = Fclk/f - 1 with Fclk = 100 MHz,
+     * so use that reference to keep the waveform time axis correct. */
+    uint32_t hz = 100000000u / (reg_divider + 1u);
     uint8_t trigger = 0, pin = 0;
     if (reg_mask) {
         uint32_t bit = 0;
