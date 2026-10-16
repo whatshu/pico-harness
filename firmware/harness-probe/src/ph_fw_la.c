@@ -14,7 +14,7 @@
 #include "ph_fw_target.h"
 #include "ph_fw_util.h"
 
-#define SM 0
+#define PH_FW_SM 0
 
 static uint32_t capture_buffer[PH_FW_LA_SAMPLES];
 static uint burst_offset, counted_offset;
@@ -29,7 +29,7 @@ static ph_fw_la_result_t *active_result;
 
 void ph_fw_la_init(void)
 {
-    pio_sm_claim(pio1, SM);
+    pio_sm_claim(pio1, PH_FW_SM);
     burst_offset = pio_add_program(pio1, &la_burst_program);
     counted_offset = pio_add_program(pio1, &la_counted_program);
     capture_dma = dma_claim_unused_channel(true);
@@ -59,9 +59,9 @@ bool ph_fw_la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pi
                              .flags = bypass ? 1u : 0u };
 
     /* Reset the sampler before selecting the triggered or immediate program. */
-    pio_sm_set_enabled(pio1, SM, false);
-    pio_sm_clear_fifos(pio1, SM);
-    pio_sm_restart(pio1, SM);
+    pio_sm_set_enabled(pio1, PH_FW_SM, false);
+    pio_sm_clear_fifos(pio1, PH_FW_SM);
+    pio_sm_restart(pio1, PH_FW_SM);
 
     pio_sm_config c = trigger ? la_counted_program_get_default_config(counted_offset) :
                                 la_burst_program_get_default_config(burst_offset);
@@ -88,10 +88,10 @@ bool ph_fw_la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pi
         pio1->instr_mem[counted_offset + la_counted_edge_high] =
             pio_encode_jmp(counted_offset + (trigger == 1 ? la_counted_sample : la_counted_edge));
     }
-    pio_sm_init(pio1, SM, offset, &c);
+    pio_sm_init(pio1, PH_FW_SM, offset, &c);
     if (trigger) {
-        pio_sm_put(pio1, SM, count - history - 1);
-        pio_sm_put(pio1, SM, history - 1);
+        pio_sm_put(pio1, PH_FW_SM, count - history - 1);
+        pio_sm_put(pio1, PH_FW_SM, history - 1);
         result->flags |= 32u | (history << 16);
     }
 
@@ -99,14 +99,14 @@ bool ph_fw_la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pi
     saved_bypass = pio1->input_sync_bypass;
     hw_write_masked(&pio1->input_sync_bypass, bypass ? PH_FW_GPIO_RAW_MASK : 0, PH_FW_GPIO_RAW_MASK);
     pio_interrupt_clear(pio1, 0);
-    pio1->fdebug = 1u << (PIO_FDEBUG_RXSTALL_LSB + SM);
+    pio1->fdebug = 1u << (PIO_FDEBUG_RXSTALL_LSB + PH_FW_SM);
 
     dma_channel_config dc = dma_channel_get_default_config(capture_dma);
     channel_config_set_transfer_data_size(&dc, DMA_SIZE_32);
     channel_config_set_read_increment(&dc, false);
     channel_config_set_write_increment(&dc, true);
     channel_config_set_high_priority(&dc, true);
-    channel_config_set_dreq(&dc, pio_get_dreq(pio1, SM, false));
+    channel_config_set_dreq(&dc, pio_get_dreq(pio1, PH_FW_SM, false));
     dma_hw->intr = 1u << capture_dma;
     if (trigger) {
         /* A one-word control DMA rewinds the write address and retriggers the
@@ -122,7 +122,7 @@ bool ph_fw_la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pi
                               &dma_channel_hw_addr(capture_dma)->al2_write_addr_trig,
                               &ring_start, 1, false);
     }
-    dma_channel_configure(capture_dma, &dc, capture_buffer, &pio1->rxf[SM], count, true);
+    dma_channel_configure(capture_dma, &dc, capture_buffer, &pio1->rxf[PH_FW_SM], count, true);
 
     active_count = count;
     active_triggered = trigger != 0;
@@ -135,7 +135,7 @@ bool ph_fw_la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pi
     active_result = result;
     result->flags |= 16u;
     active = true;
-    pio_sm_set_enabled(pio1, SM, true);
+    pio_sm_set_enabled(pio1, PH_FW_SM, true);
     return true;
 }
 
@@ -146,7 +146,7 @@ bool ph_fw_la_poll(void)
     ph_fw_la_result_t *result = active_result;
     uint32_t remaining = dma_channel_hw_addr(capture_dma)->transfer_count;
     uint32_t elapsed = time_us_32() - active_start;
-    if (remaining > 8 && (pio1->fdebug & (1u << (PIO_FDEBUG_RXSTALL_LSB + SM))))
+    if (remaining > 8 && (pio1->fdebug & (1u << (PIO_FDEBUG_RXSTALL_LSB + PH_FW_SM))))
         result->flags |= 2;
     bool cancelled = *active_epoch != active_expected_epoch;
     bool timeout = elapsed > active_deadline;
@@ -158,12 +158,12 @@ bool ph_fw_la_poll(void)
         result->flags |= 8;
     if (timeout && !finished)
         result->flags |= 4;
-    pio_sm_set_enabled(pio1, SM, false);
+    pio_sm_set_enabled(pio1, PH_FW_SM, false);
     if (active_triggered) {
         /* Drain the last FIFO words before freezing the ring. No more samples
          * can arrive after the PIO completion IRQ / state-machine disable. */
         uint32_t drain_start = time_us_32();
-        while (!pio_sm_is_rx_fifo_empty(pio1, SM) && time_us_32() - drain_start < 100)
+        while (!pio_sm_is_rx_fifo_empty(pio1, PH_FW_SM) && time_us_32() - drain_start < 100)
             tight_loop_contents();
         hw_clear_bits(&dma_channel_hw_addr(rewind_dma)->ctrl_trig, DMA_CH0_CTRL_TRIG_EN_BITS);
         hw_clear_bits(&dma_channel_hw_addr(capture_dma)->ctrl_trig, DMA_CH0_CTRL_TRIG_EN_BITS);

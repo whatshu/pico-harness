@@ -99,15 +99,15 @@ This information includes:
 /// setting can be reduced (valid range is 1 .. 255).
 #define DAP_PACKET_COUNT 8U ///< Specifies number of packets buffered.
 
-/// Indicate that UART Serial Wire Output (SWO) trace is available.
+/// Indicate that PH_FW_UART Serial Wire Output (SWO) trace is available.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
-#define SWO_UART 0 ///< SWO UART:  1 = available, 0 = not available.
+#define SWO_UART 0 ///< SWO PH_FW_UART:  1 = available, 0 = not available.
 
-/// USART Driver instance number for the UART SWO.
+/// USART Driver instance number for the PH_FW_UART SWO.
 #define SWO_UART_DRIVER 0 ///< USART Driver instance number (Driver_USART#).
 
-/// Maximum SWO UART Baudrate.
-#define SWO_UART_MAX_BAUDRATE 10000000U ///< SWO UART Maximum Baudrate in Hz.
+/// Maximum SWO PH_FW_UART Baudrate.
+#define SWO_UART_MAX_BAUDRATE 10000000U ///< SWO PH_FW_UART Maximum Baudrate in Hz.
 
 /// Indicate that Manchester Serial Wire Output (SWO) trace is available.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
@@ -122,20 +122,20 @@ This information includes:
 /// Clock frequency of the Test Domain Timer. Timer value is returned with \ref TIMESTAMP_GET.
 #define TIMESTAMP_CLOCK 1000000U ///< Timestamp clock in Hz (0 = timestamps not supported).
 
-/// Indicate that UART Communication Port is available.
+/// Indicate that PH_FW_UART Communication Port is available.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
-#define DAP_UART 0 ///< DAP UART:  1 = available, 0 = not available.
+#define DAP_UART 0 ///< DAP PH_FW_UART:  1 = available, 0 = not available.
 
-/// USART Driver instance number for the UART Communication Port.
+/// USART Driver instance number for the PH_FW_UART Communication Port.
 #define DAP_UART_DRIVER 0 ///< USART Driver instance number (Driver_USART#).
 
-/// UART Receive Buffer Size.
+/// PH_FW_UART Receive Buffer Size.
 #define DAP_UART_RX_BUFFER_SIZE 1024U ///< Uart Receive Buffer Size in bytes (must be 2^n).
 
-/// UART Transmit Buffer Size.
+/// PH_FW_UART Transmit Buffer Size.
 #define DAP_UART_TX_BUFFER_SIZE 1024U ///< Uart Transmit Buffer Size in bytes (must be 2^n).
 
-/// Indicate that UART Communication via USB COM Port is available.
+/// Indicate that PH_FW_UART Communication via USB COM Port is available.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
 #define DAP_UART_USB_COM_PORT 0 ///< USB COM Port:  1 = available, 0 = not available.
 

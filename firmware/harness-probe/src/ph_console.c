@@ -28,21 +28,21 @@
 #define PH_KIND_BULK_CRC 0x87
 #define PH_KIND_BULK_RX_ACK 0x88
 
-#define BAUD_SWITCH_DELAY_US 100000u
-#define BAUD_PREPARE_TIMEOUT_US 1000000u
-#define FRAME_IDLE_MIN_US 20000u
+#define PH_FW_BAUD_SWITCH_DELAY_US 100000u
+#define PH_FW_BAUD_PREPARE_TIMEOUT_US 1000000u
+#define PH_FW_FRAME_IDLE_MIN_US 20000u
 
-#define BAUD_MIN 300u
-#define BAUD_MAX() (clock_get_hz(clk_peri) / 16u)
+#define PH_FW_BAUD_MIN 300u
+#define PH_FW_BAUD_MAX() (clock_get_hz(clk_peri) / 16u)
 
 static ph_console_mode_t mode;
 static uint32_t current_baud;
 static uint16_t seq;
 
-#define BAUDS_IDLE 0
-#define BAUDS_PREPARE 1
-#define BAUDS_VERIFY 2
-#define BAUDS_COMMIT 3
+#define PH_FW_BAUDS_IDLE 0
+#define PH_FW_BAUDS_PREPARE 1
+#define PH_FW_BAUDS_VERIFY 2
+#define PH_FW_BAUDS_COMMIT 3
 static uint8_t baud_state;
 static uint32_t baud_target, baud_previous;
 static uint64_t baud_t0;        /* start of current transaction */
@@ -77,7 +77,7 @@ static void send(uint8_t kind, uint16_t sequence, const uint8_t *payload, size_t
     bytes[size + 8] = (uint8_t)crc;
     bytes[size + 9] = (uint8_t)(crc >> 8);
     if (ph_fw_target_serial_write(0, bytes, size + 10) < size + 10)
-        return; /* Work UART fifo full; the write is partial at worst */
+        return; /* Work PH_FW_UART fifo full; the write is partial at worst */
 }
 
 static uint64_t rollback_lease_us(void)
@@ -155,7 +155,7 @@ static void handle_frame(uint8_t kind, uint16_t frame_seq, const uint8_t *payloa
          * transfer on Work expires on its own; ignore for now. */
         break;
     case PH_KIND_BAUD_PREPARE_ACK:
-        if (baud_state == BAUDS_PREPARE && size == 4) {
+        if (baud_state == PH_FW_BAUDS_PREPARE && size == 4) {
             uint32_t echoed;
             memcpy(&echoed, payload, 4);
             if (echoed == baud_target) {
@@ -163,7 +163,7 @@ static void handle_frame(uint8_t kind, uint16_t frame_seq, const uint8_t *payloa
                  * switch after that. The 0x03->0x83 round trip costs ~1.2 ms
                  * at 115200, so anchor on the ACK instant (not our send) and
                  * add a small margin. */
-                baud_switch_at = time_us_64() + BAUD_SWITCH_DELAY_US + 5000u;
+                baud_switch_at = time_us_64() + PH_FW_BAUD_SWITCH_DELAY_US + 5000u;
                 uint64_t now = time_us_64();
                 if (now < baud_switch_at)
                     busy_wait_until(baud_switch_at);
@@ -173,30 +173,30 @@ static void handle_frame(uint8_t kind, uint16_t frame_seq, const uint8_t *payloa
                 rx_len = 0; /* bytes buffered under the old rate are stale */
                 send(PH_KIND_BAUD_VERIFY, next_seq(), NULL, 0);
                 baud_t0 = time_us_64();
-                baud_state = BAUDS_VERIFY;
+                baud_state = PH_FW_BAUDS_VERIFY;
             }
         }
         break;
     case PH_KIND_BAUD_VERIFY_ACK:
-        if (baud_state == BAUDS_VERIFY && size == 4) {
+        if (baud_state == PH_FW_BAUDS_VERIFY && size == 4) {
             uint32_t actual;
             memcpy(&actual, payload, 4);
             uint32_t err = actual > baud_target ? actual - baud_target : baud_target - actual;
             if (err * 100u <= baud_target * 2u) {
                 send(PH_KIND_BAUD_COMMIT, next_seq(), NULL, 0);
                 baud_t0 = time_us_64();
-                baud_state = BAUDS_COMMIT;
+                baud_state = PH_FW_BAUDS_COMMIT;
             } else {
                 ph_console_baud_rollback();
             }
         }
         break;
     case PH_KIND_BAUD_COMMIT_ACK:
-        if (baud_state == BAUDS_COMMIT && size == 4) {
+        if (baud_state == PH_FW_BAUDS_COMMIT && size == 4) {
             uint32_t actual;
             memcpy(&actual, payload, 4);
             current_baud = actual;
-            baud_state = BAUDS_IDLE;
+            baud_state = PH_FW_BAUDS_IDLE;
         }
         break;
     case PH_KIND_BULK_PREPARE_ACK:
@@ -218,7 +218,7 @@ static void ph_console_baud_rollback(void)
     ph_fw_target_serial_config(0, baud_previous, 8, 1, 0, &actual);
     current_baud = actual;
     rx_len = 0;
-    baud_state = BAUDS_IDLE;
+    baud_state = PH_FW_BAUDS_IDLE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -233,7 +233,7 @@ void ph_console_init(void)
     mode = PH_CONSOLE_PLAIN;
     seq = 0;
     rx_len = 0;
-    baud_state = BAUDS_IDLE;
+    baud_state = PH_FW_BAUDS_IDLE;
     uint32_t baud = 115200;
     ph_fw_target_serial_config(0, baud, 8, 1, 0, &baud);
     current_baud = baud;
@@ -257,15 +257,15 @@ void ph_console_pump(void)
     }
 
     /* Expire a partially filled frame after ~4 characters / 20 ms. */
-    if (rx_len && time_us_64() - rx_last_at >= FRAME_IDLE_MIN_US)
+    if (rx_len && time_us_64() - rx_last_at >= PH_FW_FRAME_IDLE_MIN_US)
         parse_frames(true);
 
     /* Advance the baud transaction: timeouts / leases. */
     if (baud_state) {
         uint64_t lease = rollback_lease_us();
         uint64_t elapsed = time_us_64() - baud_t0;
-        if ((baud_state == BAUDS_PREPARE && elapsed > BAUD_PREPARE_TIMEOUT_US) ||
-            (baud_state != BAUDS_PREPARE && elapsed > lease)) {
+        if ((baud_state == PH_FW_BAUDS_PREPARE && elapsed > PH_FW_BAUD_PREPARE_TIMEOUT_US) ||
+            (baud_state != PH_FW_BAUDS_PREPARE && elapsed > lease)) {
             ph_console_baud_rollback();
         }
     }
@@ -287,7 +287,7 @@ void ph_console_write(const uint8_t *data, size_t len)
 
 bool ph_console_baud(uint32_t baud, uint32_t *actual)
 {
-    if (baud < BAUD_MIN || baud > BAUD_MAX())
+    if (baud < PH_FW_BAUD_MIN || baud > PH_FW_BAUD_MAX())
         return false;
 
     if (mode == PH_CONSOLE_HARNESS) {
@@ -304,16 +304,16 @@ bool ph_console_baud(uint32_t baud, uint32_t *actual)
         uint32_t le = baud;
         send(PH_KIND_BAUD_PREPARE, next_seq(), (const uint8_t *)&le, 4);
         baud_t0 = time_us_64();
-        baud_state = BAUDS_PREPARE;
+        baud_state = PH_FW_BAUDS_PREPARE;
         /* Wait out the transaction (100 ms switch + verify/commit). */
-        uint64_t deadline = time_us_64() + BAUD_PREPARE_TIMEOUT_US + rollback_lease_us();
-        while (baud_state != BAUDS_IDLE && time_us_64() < deadline) {
+        uint64_t deadline = time_us_64() + PH_FW_BAUD_PREPARE_TIMEOUT_US + rollback_lease_us();
+        while (baud_state != PH_FW_BAUDS_IDLE && time_us_64() < deadline) {
             ph_console_pump();
             tight_loop_contents();
         }
-        if (baud_state != BAUDS_IDLE)
+        if (baud_state != PH_FW_BAUDS_IDLE)
             ph_console_baud_rollback();
-        /* Success = the applied rate landed within 2% of the request (UART
+        /* Success = the applied rate landed within 2% of the request (PH_FW_UART
          * dividers round, so e.g. 125000000/271 = 460829 for 460800). */
         uint32_t err = current_baud > baud_target ? current_baud - baud_target
                                                   : baud_target - current_baud;
@@ -342,7 +342,7 @@ void ph_console_reset(void)
     mode = PH_CONSOLE_PLAIN;
     seq = 0;
     rx_len = 0;
-    baud_state = BAUDS_IDLE;
+    baud_state = PH_FW_BAUDS_IDLE;
     uint32_t baud = 115200;
     ph_fw_target_serial_config(0, baud, 8, 1, 0, &baud);
     current_baud = baud;

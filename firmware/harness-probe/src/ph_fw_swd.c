@@ -20,7 +20,7 @@
 /*
  * This is a shim between the SW_DP functions and the PIO
  * implementation used for Debugprobe. Instead of calling bitbash functions,
- * hand off the bit sequences to a SM for asynchronous completion.
+ * hand off the bit sequences to a PH_FW_SM for asynchronous completion.
  */
 
 #include <stdio.h>
@@ -31,7 +31,7 @@
 
 /* Slight hack - we're not bitbashing so we need to set baudrate off the DAP's delay cycles.
  * Ideally we don't want calls to udiv everywhere... */
-#define MAKE_KHZ(x) (CPU_CLOCK / (2000 * ((x) + 1)))
+#define PH_FW_MAKE_KHZ(x) (CPU_CLOCK / (2000 * ((x) + 1)))
 volatile uint32_t cached_delay = 0;
 
 /* Generate SWJ Sequence */
@@ -45,7 +45,7 @@ void SWJ_Sequence(uint32_t count, const uint8_t *data)
     uint32_t n;
 
     if (DAP_Data.clock_delay != cached_delay) {
-        ph_fw_target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
+        ph_fw_target_swd_set_clk_freq(PH_FW_MAKE_KHZ(DAP_Data.clock_delay));
         cached_delay = DAP_Data.clock_delay;
     }
     ph_fw_probe_debug("SWJ sequence count = %d FDB=0x%2x\n", count, data[0]);
@@ -73,7 +73,7 @@ void SWD_Sequence(uint32_t info, const uint8_t *swdo, uint8_t *swdi)
     uint32_t n;
 
     if (DAP_Data.clock_delay != cached_delay) {
-        ph_fw_target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
+        ph_fw_target_swd_set_clk_freq(PH_FW_MAKE_KHZ(DAP_Data.clock_delay));
         cached_delay = DAP_Data.clock_delay;
     }
     ph_fw_probe_debug("SWD sequence\n");
@@ -119,7 +119,7 @@ uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
     uint32_t n;
 
     if (DAP_Data.clock_delay != cached_delay) {
-        ph_fw_target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
+        ph_fw_target_swd_set_clk_freq(PH_FW_MAKE_KHZ(DAP_Data.clock_delay));
         cached_delay = DAP_Data.clock_delay;
     }
     ph_fw_probe_debug("SWD_transfer\n");

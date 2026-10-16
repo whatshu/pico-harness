@@ -129,6 +129,7 @@ P1 已完成并实机验证(RP2040 Debug core,`/dev/ttyACM*` + pyusb 实测):
 | P4 desktop | `device_control::PdbgLink` 改为 `ph_bridge` 适配层(控制面走 PH;UART/SPI/capture 通道已改道并明确报错) | ✅ workspace 编译零警告、73 测试过、实机 `live` 集成测试过 |
 | P5 改名 | 固件自有模块统一 `ph_fw_*`(worker/target/swd/util/usb/la)+ 宏前缀 `PDBG_`→`PH_FW_`,文件随模块重命名 | ✅ 双板编译、离线门闸、实机 7 项设备测试全过 |
 | P5 改名(host/desktop) | desktop crate `ph-app` / `ph_app_link`、类型 `PhBoardLink`、固件标识串校验同步 | ✅ 编译零警告、73 测试 + 实机 `live` 集成测试过 |
+| P5 改名(宏/线程) | 固件自有局部宏与线程入口 `PH_FW_*`/`ph_fw_*`(CMSIS-DAP 契约宏与 `tud_*`/`DAP_*` 除外) | ✅ 双板编译、离线门闸、实机 7 项 + sigrok 扫描过 |
 
 阶段边界按里程碑提交;每阶段`./build.sh test --offline` + 实机冒烟为门。
 

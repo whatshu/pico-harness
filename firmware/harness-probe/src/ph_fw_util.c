@@ -34,8 +34,8 @@ uint32_t ph_fw_crc32c(const uint8_t *data, size_t length)
 uint32_t ph_fw_normalize_gpio(uint32_t raw)
 {
     uint32_t sample = 0;
-#define MAP_PIN(debug_pin, work_pin) sample |= ((raw >> debug_pin) & 1u) << work_pin;
-    PH_FW_GPIO_MAP(MAP_PIN)
-#undef MAP_PIN
+#define PH_FW_MAP_PIN(debug_pin, work_pin) sample |= ((raw >> debug_pin) & 1u) << work_pin;
+    PH_FW_GPIO_MAP(PH_FW_MAP_PIN)
+#undef PH_FW_MAP_PIN
     return sample & PH_FW_GPIO_CAPTURE_MASK;
 }

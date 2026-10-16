@@ -35,7 +35,7 @@ void ph_bulk_worker(void);
 bool ph_bulk_rx_begin(uint32_t route, uint32_t length, uint32_t crc);
 
 /* core1: pico_harness bulk replies (`0x86`/`0x87`/`0x88`) parsed on the Work
- * UART by ph_console are handed here to advance the WORK_SPI forward FSM. */
+ * PH_FW_UART by ph_console are handed here to advance the WORK_SPI forward FSM. */
 void ph_bulk_on_uart(uint8_t kind, uint16_t seq, const uint8_t *payload, size_t size);
 
 bool ph_bulk_busy(void);

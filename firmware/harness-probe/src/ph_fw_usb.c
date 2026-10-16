@@ -28,33 +28,33 @@
 
 #define DAP_OUT_EP_NUM 0x04
 #define DAP_IN_EP_NUM 0x85
-#define CDC0_NOTIFY_EP_NUM 0x82
-#define CDC0_OUT_EP_NUM 0x02
-#define CDC0_IN_EP_NUM 0x83
-#define BULK_OUT_EP_NUM 0x05
-#define BULK_IN_EP_NUM 0x86
-#define CDC1_NOTIFY_EP_NUM 0x81
-#define CDC1_OUT_EP_NUM 0x06
-#define CDC1_IN_EP_NUM 0x87
+#define PH_FW_CDC0_NOTIFY_EP_NUM 0x82
+#define PH_FW_CDC0_OUT_EP_NUM 0x02
+#define PH_FW_CDC0_IN_EP_NUM 0x83
+#define PH_FW_BULK_OUT_EP_NUM 0x05
+#define PH_FW_BULK_IN_EP_NUM 0x86
+#define PH_FW_CDC1_NOTIFY_EP_NUM 0x81
+#define PH_FW_CDC1_OUT_EP_NUM 0x06
+#define PH_FW_CDC1_IN_EP_NUM 0x87
 
 /* PH Terminal Bulk is a generic vendor interface (FF/50/01), distinct from the
  * CMSIS-DAP driver's FF/00/00 so the built-in TinyUSB vendor class claims it. */
-#define TUD_PH_BULK_DESCRIPTOR(_itfnum, _stridx, _epout, _epin, _epsize)                        \
+#define PH_FW_TUD_PH_BULK_DESCRIPTOR(_itfnum, _stridx, _epout, _epin, _epsize)                        \
     9, TUSB_DESC_INTERFACE, _itfnum, 0, 2, TUSB_CLASS_VENDOR_SPECIFIC, 0x50, 0x01, _stridx, 7,  \
         TUSB_DESC_ENDPOINT, _epout, TUSB_XFER_BULK, U16_TO_U8S_LE(_epsize), 0, 7,               \
         TUSB_DESC_ENDPOINT, _epin, TUSB_XFER_BULK, U16_TO_U8S_LE(_epsize), 0
 
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN + \
+#define PH_FW_CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN + \
                           TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN)
-#define MS_OS_20_DESC_LEN 0xB2
-#define BOS_TOTAL_LEN (TUD_BOS_DESC_LEN + TUD_BOS_MICROSOFT_OS_DESC_LEN)
+#define PH_FW_MS_OS_20_DESC_LEN 0xB2
+#define PH_FW_BOS_TOTAL_LEN (TUD_BOS_DESC_LEN + TUD_BOS_MICROSOFT_OS_DESC_LEN)
 
 #define DAP_INTERFACE_SUBCLASS 0x00
 #define DAP_INTERFACE_PROTOCOL 0x00
-#define WR_IDX(x) (x.write_idx % DAP_PACKET_COUNT)
-#define RD_IDX(x) (x.read_idx % DAP_PACKET_COUNT)
-#define WR_SLOT_PTR(x) &(x.data[WR_IDX(x)][0])
-#define RD_SLOT_PTR(x) &(x.data[RD_IDX(x)][0])
+#define PH_FW_WR_IDX(x) (x.write_idx % DAP_PACKET_COUNT)
+#define PH_FW_RD_IDX(x) (x.read_idx % DAP_PACKET_COUNT)
+#define PH_FW_WR_SLOT_PTR(x) &(x.data[PH_FW_WR_IDX(x)][0])
+#define PH_FW_RD_SLOT_PTR(x) &(x.data[PH_FW_RD_IDX(x)][0])
 
 enum {
     ITF_DAP, /* Old versions of Keil MDK only look at interface 0 */
@@ -115,7 +115,7 @@ static char *dap_cmd_string[] = {
 };
 
 /* Main DAP loop, defined below; tud_mount_cb() spawns it via xTaskCreate(). */
-static void dap_thread(void *ptr);
+static void ph_fw_dap_thread(void *ptr);
 static void dap_edpt_init(void);
 static bool dap_edpt_deinit(void);
 static void dap_edpt_reset(uint8_t __unused rhport);
@@ -149,18 +149,18 @@ tusb_desc_device_t const desc_device = {
 
 /* Configuration descriptor */
 uint8_t const desc_configuration[] = {
-    TUD_CONFIG_DESCRIPTOR(1, ITF_TOTAL, 0, CONFIG_TOTAL_LEN, 0, 100),
+    TUD_CONFIG_DESCRIPTOR(1, ITF_TOTAL, 0, PH_FW_CONFIG_TOTAL_LEN, 0, 100),
     /* Interface 0: CMSIS-DAP v2 (SWD). Keil MDK expects interface 0. */
     TUD_VENDOR_DESCRIPTOR(ITF_DAP, 4, DAP_OUT_EP_NUM, DAP_IN_EP_NUM, 64),
     /* Interface 1,2 (CDC): PH Terminal -- all control/console messages. */
-    TUD_CDC_DESCRIPTOR(ITF_CDC0, 5, CDC0_NOTIFY_EP_NUM, 8, CDC0_OUT_EP_NUM, CDC0_IN_EP_NUM, 64),
+    TUD_CDC_DESCRIPTOR(ITF_CDC0, 5, PH_FW_CDC0_NOTIFY_EP_NUM, 8, PH_FW_CDC0_OUT_EP_NUM, PH_FW_CDC0_IN_EP_NUM, 64),
     /* Interface 3 (vendor, FF/50/01): PH Terminal Bulk -- raw payload data plane. */
-    TUD_PH_BULK_DESCRIPTOR(ITF_BULK, 6, BULK_OUT_EP_NUM, BULK_IN_EP_NUM, 64),
+    PH_FW_TUD_PH_BULK_DESCRIPTOR(ITF_BULK, 6, PH_FW_BULK_OUT_EP_NUM, PH_FW_BULK_IN_EP_NUM, 64),
     /* Interface 4,5 (CDC): Logic Analyzer (SUMP) -- reserved for the SUMP phase. */
-    TUD_CDC_DESCRIPTOR(ITF_CDC1, 7, CDC1_NOTIFY_EP_NUM, 8, CDC1_OUT_EP_NUM, CDC1_IN_EP_NUM, 64),
+    TUD_CDC_DESCRIPTOR(ITF_CDC1, 7, PH_FW_CDC1_NOTIFY_EP_NUM, 8, PH_FW_CDC1_OUT_EP_NUM, PH_FW_CDC1_IN_EP_NUM, 64),
 };
 
-TU_VERIFY_STATIC(sizeof(desc_configuration) == CONFIG_TOTAL_LEN,
+TU_VERIFY_STATIC(sizeof(desc_configuration) == PH_FW_CONFIG_TOTAL_LEN,
                  "Incorrect configuration descriptor size");
 
 /* String descriptors */
@@ -192,32 +192,32 @@ static uint16_t _desc_str[32];
  * (Section Microsoft OS compatibility descriptors)
  */
 uint8_t const desc_bos[] = { /* total length, number of device caps */
-                             TUD_BOS_DESCRIPTOR(BOS_TOTAL_LEN, 1),
+                             TUD_BOS_DESCRIPTOR(PH_FW_BOS_TOTAL_LEN, 1),
 
                              /* Microsoft OS 2.0 descriptor */
-                             TUD_BOS_MS_OS_20_DESCRIPTOR(MS_OS_20_DESC_LEN, 1)
+                             TUD_BOS_MS_OS_20_DESCRIPTOR(PH_FW_MS_OS_20_DESC_LEN, 1)
 };
 
 uint8_t const desc_ms_os_20[] = {
     /* Set header: length, type, windows version, total length */
     U16_TO_U8S_LE(0x000A), U16_TO_U8S_LE(MS_OS_20_SET_HEADER_DESCRIPTOR), U32_TO_U8S_LE(0x06030000),
-    U16_TO_U8S_LE(MS_OS_20_DESC_LEN),
+    U16_TO_U8S_LE(PH_FW_MS_OS_20_DESC_LEN),
 
     /* Configuration subset header: length, type, configuration index, reserved,
      * configuration total length */
     U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_CONFIGURATION), 0, 0,
-    U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A),
+    U16_TO_U8S_LE(PH_FW_MS_OS_20_DESC_LEN - 0x0A),
 
     /* Function Subset header: length, type, first interface, reserved, subset length */
     U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), ITF_DAP, 0,
-    U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A - 0x08),
+    U16_TO_U8S_LE(PH_FW_MS_OS_20_DESC_LEN - 0x0A - 0x08),
 
     /* MS OS 2.0 Compatible ID descriptor: length, type, compatible ID, sub compatible ID */
     U16_TO_U8S_LE(0x0014), U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID), 'W', 'I', 'N', 'U', 'S',
     'B', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* sub-compatible */
 
     /* MS OS 2.0 Registry property descriptor: length, type */
-    U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A - 0x08 - 0x08 - 0x14),
+    U16_TO_U8S_LE(PH_FW_MS_OS_20_DESC_LEN - 0x0A - 0x08 - 0x08 - 0x14),
     U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY), U16_TO_U8S_LE(0x0007),
     /* wPropertyDataType, wPropertyNameLength and the property name
      * string "DeviceInterfaceGUIDs", all encoded as UTF-16. */
@@ -234,7 +234,7 @@ uint8_t const desc_ms_os_20[] = {
     '7', 0x00, '7', 0x00, '6', 0x00, '}', 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-TU_VERIFY_STATIC(sizeof(desc_ms_os_20) == MS_OS_20_DESC_LEN, "Incorrect size");
+TU_VERIFY_STATIC(sizeof(desc_ms_os_20) == PH_FW_MS_OS_20_DESC_LEN, "Incorrect size");
 
 static usbd_class_driver_t const dap_edpt_driver = { .init = dap_edpt_init,
                                                      .deinit = dap_edpt_deinit,
@@ -386,7 +386,7 @@ void tud_mount_cb(void)
     ph_fw_probe_info("Connected, Configured: %d\n", !!was_configured);
     if (!was_configured) {
         /* Lowest priority thread is debug - need to shuffle buffers before we can toggle swd... */
-        xTaskCreate(dap_thread, "DAP", configMINIMAL_STACK_SIZE, NULL, DAP_TASK_PRIO,
+        xTaskCreate(ph_fw_dap_thread, "DAP", configMINIMAL_STACK_SIZE, NULL, DAP_TASK_PRIO,
                     &dap_taskhandle);
         was_configured = 1;
     }
@@ -464,9 +464,9 @@ static uint16_t dap_edpt_open(uint8_t __unused rhport, tusb_desc_interface_t con
     out_ep_addr = ep_addr;
 
     TU_ASSERT(usbd_edpt_open(rhport, edpt_desc), 0);
-    TU_ASSERT(usbd_edpt_xfer(rhport, ep_addr, WR_SLOT_PTR(usb_request_buffer), DAP_PACKET_SIZE), 0);
+    TU_ASSERT(usbd_edpt_xfer(rhport, ep_addr, PH_FW_WR_SLOT_PTR(usb_request_buffer), DAP_PACKET_SIZE), 0);
 
-    /* IN is queued by dap_thread once a response exists. */
+    /* IN is queued by ph_fw_dap_thread once a response exists. */
     edpt_desc++;
     ep_addr = edpt_desc->bEndpointAddress;
 
@@ -496,8 +496,8 @@ static bool dap_edpt_xfer_cb(uint8_t __unused rhport, uint8_t ep_addr, xfer_resu
             /* The worker may have queued several responses while USB was busy.
              * Keep sending until the next completion reaches its write index. */
             if (!usb_response_buffer.was_empty) {
-                usbd_edpt_xfer(rhport, ep_addr, RD_SLOT_PTR(usb_response_buffer),
-                               usb_response_buffer.data_len[RD_IDX(usb_response_buffer)]);
+                usbd_edpt_xfer(rhport, ep_addr, PH_FW_RD_SLOT_PTR(usb_response_buffer),
+                               usb_response_buffer.data_len[PH_FW_RD_IDX(usb_response_buffer)]);
                 usb_response_buffer.was_empty = (usb_response_buffer.read_idx + 1) ==
                                                 usb_response_buffer.write_idx;
             }
@@ -511,11 +511,11 @@ static bool dap_edpt_xfer_cb(uint8_t __unused rhport, uint8_t ep_addr, xfer_resu
     } else if (ep_dir == TUSB_DIR_OUT) {
         if (xferred_bytes >= 0u && xferred_bytes <= DAP_PACKET_SIZE) {
             xSemaphoreTake(edpt_lock, portMAX_DELAY);
-            /* Leave OUT unarmed when the request ring is full; dap_thread
+            /* Leave OUT unarmed when the request ring is full; ph_fw_dap_thread
              * re-arms it after consuming a packet. */
             if (!buffer_full(&usb_request_buffer)) {
                 usb_request_buffer.write_idx++;
-                usbd_edpt_xfer(rhport, ep_addr, WR_SLOT_PTR(usb_request_buffer), DAP_PACKET_SIZE);
+                usbd_edpt_xfer(rhport, ep_addr, PH_FW_WR_SLOT_PTR(usb_request_buffer), DAP_PACKET_SIZE);
                 usb_request_buffer.was_full = false;
             } else {
                 usb_request_buffer.was_full = true;
@@ -530,7 +530,7 @@ static bool dap_edpt_xfer_cb(uint8_t __unused rhport, uint8_t ep_addr, xfer_resu
     return false;
 }
 
-static void dap_thread(void *ptr)
+static void ph_fw_dap_thread(void *ptr)
 {
     uint32_t n;
     uint32_t cmd;
@@ -562,36 +562,36 @@ static void dap_thread(void *ptr)
             /* Read the next request from the ring. */
             ph_fw_probe_info("%lu %lu DAP cmd %s len %02x\n", usb_request_buffer.write_idx,
                        usb_request_buffer.read_idx,
-                       dap_cmd_string[*RD_SLOT_PTR(usb_request_buffer)],
-                       *(RD_SLOT_PTR(usb_request_buffer) + 1));
+                       dap_cmd_string[*PH_FW_RD_SLOT_PTR(usb_request_buffer)],
+                       *(PH_FW_RD_SLOT_PTR(usb_request_buffer) + 1));
 
             /* A consumed slot lets the OUT endpoint receive again. */
             xSemaphoreTake(edpt_lock, portMAX_DELAY);
             if (usb_request_buffer.was_full) {
                 usb_request_buffer.write_idx++;
-                usbd_edpt_xfer(dap_rhport, out_ep_addr, WR_SLOT_PTR(usb_request_buffer),
+                usbd_edpt_xfer(dap_rhport, out_ep_addr, PH_FW_WR_SLOT_PTR(usb_request_buffer),
                                DAP_PACKET_SIZE);
                 usb_request_buffer.was_full = false;
             }
             xSemaphoreGive(edpt_lock);
 
-            resp_len = DAP_ExecuteCommand(RD_SLOT_PTR(usb_request_buffer),
-                                          WR_SLOT_PTR(usb_response_buffer)) &
+            resp_len = DAP_ExecuteCommand(PH_FW_RD_SLOT_PTR(usb_request_buffer),
+                                          PH_FW_WR_SLOT_PTR(usb_response_buffer)) &
                        0xffff;
             usb_request_buffer.read_idx++;
             ph_fw_probe_info("%lu %lu DAP resp %s len %u\n", usb_response_buffer.write_idx,
                        usb_response_buffer.read_idx,
-                       dap_cmd_string[*WR_SLOT_PTR(usb_response_buffer)], resp_len);
+                       dap_cmd_string[*PH_FW_WR_SLOT_PTR(usb_response_buffer)], resp_len);
 
-            usb_response_buffer.data_len[WR_IDX(usb_response_buffer)] = resp_len;
+            usb_response_buffer.data_len[PH_FW_WR_IDX(usb_response_buffer)] = resp_len;
             /* Publish the response and start IN if the endpoint was idle. */
             xSemaphoreTake(edpt_lock, portMAX_DELAY);
 
             if (buffer_empty(&usb_response_buffer)) {
                 usb_response_buffer.write_idx++;
 
-                usbd_edpt_xfer(dap_rhport, in_ep_addr, RD_SLOT_PTR(usb_response_buffer),
-                               usb_response_buffer.data_len[RD_IDX(usb_response_buffer)]);
+                usbd_edpt_xfer(dap_rhport, in_ep_addr, PH_FW_RD_SLOT_PTR(usb_response_buffer),
+                               usb_response_buffer.data_len[PH_FW_RD_IDX(usb_response_buffer)]);
             } else {
                 usb_response_buffer.write_idx++;
 

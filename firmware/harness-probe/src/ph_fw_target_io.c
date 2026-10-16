@@ -5,7 +5,7 @@
  * ============================================================================
  *
  * Everything in the probe that physically touches the work-board.  Higher
- * layers (worker.c, control_thread, the CMSIS-DAP shim in swd.c) never reach
+ * layers (worker.c, ph_fw_control_thread, the CMSIS-DAP shim in swd.c) never reach
  * into pins or controller registers directly; they call the target_* API
  * declared in target.h.
  *
@@ -13,11 +13,11 @@
  *
  *   target_led_*       system-status LED: mode state + gpio redraw.  Pattern
  *                      selection is public (any module may request a mode);
- *                      control_thread redraws once per loop.
+ *                      ph_fw_control_thread redraws once per loop.
  *
  *   target_serial_*    the two serial faces of the probe:
  *                        - USB identity: iSerialNumber from the flash UUID;
- *                        - CDC-UART bridge: DMA-driven UART behind the virtual
+ *                        - CDC-PH_FW_UART bridge: DMA-driven PH_FW_UART behind the virtual
  *                          COM port.  RX DMA runs continuously, TX DMA drains
  *                          bounded pieces of a software ring.  All bridge
  *                          calls run on core 1 except init before launch, and
@@ -58,16 +58,16 @@
 #include "ph_fw_target.h"
 #include "tusb.h"
 
-#define RING_SIZE 4096u
-#define RING_MASK (RING_SIZE - 1u)
+#define PH_FW_RING_SIZE 4096u
+#define PH_FW_RING_MASK (PH_FW_RING_SIZE - 1u)
 /* Both RP2040 and RP2350 support an ordinary 28-bit transfer count. */
-#define RX_TRANSFERS 0x0fffffffu
-#define UART PROBE_UART0_INTERFACE
+#define PH_FW_RX_TRANSFERS 0x0fffffffu
+#define PH_FW_UART PROBE_UART0_INTERFACE
 
-#define INA_ADDR 0x40
-#define I2C_TIMEOUT_US 5000
+#define PH_FW_INA_ADDR 0x40
+#define PH_FW_I2C_TIMEOUT_US 5000
 /* Work pins that must never be driven while the Work rail is off. */
-#define CROSS_MASK (PH_FW_GPIO_RAW_MASK | (1u << PROBE_PIN_SWCLK) | (1u << PROBE_PIN_SWDIO))
+#define PH_FW_CROSS_MASK (PH_FW_GPIO_RAW_MASK | (1u << PROBE_PIN_SWCLK) | (1u << PROBE_PIN_SWDIO))
 
 /* Debug pins for timing probes (opt-in; see CU_SELECT_DEBUG_PINS). */
 enum dbg_pins {
@@ -101,8 +101,8 @@ static pico_unique_board_id_t uID;
 
 /* RX DMA writes a 4 KiB ring. Indices are monotonic positions, masked only
  * when indexing the buffers; serial_rx_base anchors the DMA counter. */
-static uint8_t serial_rx_data[RING_SIZE] __attribute__((aligned(RING_SIZE)));
-static uint8_t serial_tx_data[RING_SIZE];
+static uint8_t serial_rx_data[PH_FW_RING_SIZE] __attribute__((aligned(PH_FW_RING_SIZE)));
+static uint8_t serial_tx_data[PH_FW_RING_SIZE];
 static uint32_t serial_rx_read, serial_rx_base, serial_rx_last;
 static uint32_t serial_tx_read, serial_tx_write, serial_tx_pending;
 static uint32_t serial_rx_overruns;
@@ -197,11 +197,11 @@ void ph_fw_target_led_tick(void)
 #endif
 
 /* ============================================================================
- * Compact serial bridge (USB identity + DMA-driven UART)
+ * Compact serial bridge (USB identity + DMA-driven PH_FW_UART)
  * ============================================================================ */
 
 /*
- * RX engine: one always-running DMA ring reads the UART into serial_rx_data.
+ * RX engine: one always-running DMA ring reads the PH_FW_UART into serial_rx_data.
  * TX engine: the software ring is drained in bounded chunks by a second DMA
  * channel whenever it goes idle.  All of the *_nl() helpers below assume the
  * caller holds serial_lock; the public entry points acquire it.
@@ -215,27 +215,27 @@ static void target_serial_rx_start(void)
     channel_config_set_read_increment(&c, false);
     channel_config_set_write_increment(&c, true);
     channel_config_set_ring(&c, true, 12);
-    channel_config_set_dreq(&c, uart_get_dreq(UART, false));
-    dma_channel_configure(serial_rx_dma, &c, serial_rx_data + (serial_rx_base & RING_MASK),
-                          &uart_get_hw(UART)->dr, RX_TRANSFERS, true);
+    channel_config_set_dreq(&c, uart_get_dreq(PH_FW_UART, false));
+    dma_channel_configure(serial_rx_dma, &c, serial_rx_data + (serial_rx_base & PH_FW_RING_MASK),
+                          &uart_get_hw(PH_FW_UART)->dr, PH_FW_RX_TRANSFERS, true);
 }
 
 /* Rederive how much data the DMA ring has produced and count overruns. */
 static uint32_t target_serial_rx_update(void)
 {
     uint32_t write =
-        serial_rx_base + RX_TRANSFERS - dma_channel_hw_addr(serial_rx_dma)->transfer_count;
+        serial_rx_base + PH_FW_RX_TRANSFERS - dma_channel_hw_addr(serial_rx_dma)->transfer_count;
 
     __dmb(); /* DMA data is visible before the producer index is used. */
-    if (write - serial_rx_read > RING_SIZE) {
-        serial_rx_overruns += write - serial_rx_read - RING_SIZE;
-        serial_rx_read = write - RING_SIZE;
+    if (write - serial_rx_read > PH_FW_RING_SIZE) {
+        serial_rx_overruns += write - serial_rx_read - PH_FW_RING_SIZE;
+        serial_rx_read = write - PH_FW_RING_SIZE;
     }
 
     /* RSR is sticky; count error observations as well as exact ring drops. */
-    if (uart_get_hw(UART)->rsr) {
+    if (uart_get_hw(PH_FW_UART)->rsr) {
         ++serial_rx_overruns;
-        uart_get_hw(UART)->rsr = 0;
+        uart_get_hw(PH_FW_UART)->rsr = 0;
     }
 
     serial_rx_last = write;
@@ -246,7 +246,7 @@ static uint32_t target_serial_rx_update(void)
  *  - gate behind Work power: abort everything while the rail is off,
  *  - arm the RX ring (and restart it when it wraps),
  *  - push the next TX chunk once the previous one drained.
- * Returns false when the UART bridge is disabled. */
+ * Returns false when the PH_FW_UART bridge is disabled. */
 static bool target_serial_poll_nl(void)
 {
     if (!ph_fw_target_io_ready()) {
@@ -261,8 +261,8 @@ static bool target_serial_poll_nl(void)
     }
 
     if (!serial_enabled) {
-        while (uart_is_readable(UART))
-            (void)uart_getc(UART);
+        while (uart_is_readable(PH_FW_UART))
+            (void)uart_getc(PH_FW_UART);
         target_serial_rx_start();
         serial_enabled = true;
     }
@@ -280,14 +280,14 @@ static bool target_serial_poll_nl(void)
 
     if (!serial_tx_pending && serial_tx_write != serial_tx_read) {
         serial_tx_pending =
-            MIN(serial_tx_write - serial_tx_read, RING_SIZE - (serial_tx_read & RING_MASK));
+            MIN(serial_tx_write - serial_tx_read, PH_FW_RING_SIZE - (serial_tx_read & PH_FW_RING_MASK));
         dma_channel_config c = dma_channel_get_default_config(serial_tx_dma);
         channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
         channel_config_set_read_increment(&c, true);
         channel_config_set_write_increment(&c, false);
-        channel_config_set_dreq(&c, uart_get_dreq(UART, true));
-        dma_channel_configure(serial_tx_dma, &c, &uart_get_hw(UART)->dr,
-                              serial_tx_data + (serial_tx_read & RING_MASK), serial_tx_pending,
+        channel_config_set_dreq(&c, uart_get_dreq(PH_FW_UART, true));
+        dma_channel_configure(serial_tx_dma, &c, &uart_get_hw(PH_FW_UART)->dr,
+                              serial_tx_data + (serial_tx_read & PH_FW_RING_MASK), serial_tx_pending,
                               true);
     }
 
@@ -317,16 +317,16 @@ bool ph_fw_target_serial_config(uint8_t channel, uint32_t baud, uint8_t bits, ui
     dma_channel_abort(serial_tx_dma);
 
     /* Discard queued data on reconfiguration, matching the original API. */
-    uart_set_fifo_enabled(UART, false);
-    *actual = uart_set_baudrate(UART, baud);
-    uart_set_format(UART, bits, stop,
+    uart_set_fifo_enabled(PH_FW_UART, false);
+    *actual = uart_set_baudrate(PH_FW_UART, baud);
+    uart_set_format(PH_FW_UART, bits, stop,
                     parity == 1 ? UART_PARITY_ODD :
                     parity == 2 ? UART_PARITY_EVEN :
                                   UART_PARITY_NONE);
-    uart_set_fifo_enabled(UART, true);
-    while (uart_is_readable(UART))
-        (void)uart_getc(UART);
-    uart_get_hw(UART)->rsr = 0;
+    uart_set_fifo_enabled(PH_FW_UART, true);
+    while (uart_is_readable(PH_FW_UART))
+        (void)uart_getc(PH_FW_UART);
+    uart_get_hw(PH_FW_UART)->rsr = 0;
     serial_rx_read = serial_rx_base = serial_rx_last = 0;
     serial_tx_read = serial_tx_write = serial_tx_pending = serial_rx_overruns = 0;
     serial_enabled = false;
@@ -344,9 +344,9 @@ size_t ph_fw_target_serial_write(uint8_t channel, const uint8_t *data, size_t le
         return 0;
     }
     target_serial_poll_nl();
-    size_t count = MIN(length, RING_SIZE - (serial_tx_write - serial_tx_read));
+    size_t count = MIN(length, PH_FW_RING_SIZE - (serial_tx_write - serial_tx_read));
     for (size_t i = 0; i < count; ++i)
-        serial_tx_data[(serial_tx_write + i) & RING_MASK] = data[i];
+        serial_tx_data[(serial_tx_write + i) & PH_FW_RING_MASK] = data[i];
     serial_tx_write += count;
     target_serial_poll_nl();
     spin_unlock(serial_lock, irq);
@@ -364,10 +364,10 @@ size_t ph_fw_target_serial_read(uint8_t channel, uint8_t *data, size_t length)
     uint32_t start = serial_rx_read;
     size_t count = MIN(length, write - start);
     for (size_t i = 0; i < count; ++i)
-        data[i] = serial_rx_data[(serial_rx_read + i) & RING_MASK];
+        data[i] = serial_rx_data[(serial_rx_read + i) & PH_FW_RING_MASK];
     /* Detect a producer lap during the copy rather than returning corrupt data. */
     uint32_t after = target_serial_rx_update();
-    if (after - start > RING_SIZE) {
+    if (after - start > PH_FW_RING_SIZE) {
         spin_unlock(serial_lock, irq);
         return 0;
     }
@@ -385,13 +385,13 @@ bool ph_fw_target_serial_status(uint8_t channel, uint16_t *available, uint16_t *
     }
     target_serial_poll_nl();
     *available = serial_enabled ? (uint16_t)(serial_rx_last - serial_rx_read) : 0;
-    *space = (uint16_t)(RING_SIZE - (serial_tx_write - serial_tx_read));
+    *space = (uint16_t)(PH_FW_RING_SIZE - (serial_tx_write - serial_tx_read));
     *errors = serial_rx_overruns;
     spin_unlock(serial_lock, irq);
     return true;
 }
 
-/* USB identity + CDC-UART bridge bring-up; call once, before tusb_init(). */
+/* USB identity + CDC-PH_FW_UART bridge bring-up; call once, before tusb_init(). */
 void ph_fw_target_serial_init(void)
 {
     pico_get_unique_board_id(&uID);
@@ -406,13 +406,13 @@ void ph_fw_target_serial_init(void)
         ph_fw_usb_serial[i] = nibble < 10 ? nibble + '0' : nibble + 'A' - 10;
     }
 
-    /* UART pins and DMA are ready before the worker core starts polling. */
+    /* PH_FW_UART pins and DMA are ready before the worker core starts polling. */
     ph_fw_target_gpio_function(PROBE_UART0_TX, GPIO_FUNC_UART);
     ph_fw_target_gpio_function(PROBE_UART0_RX, GPIO_FUNC_UART);
     gpio_disable_pulls(PROBE_UART0_TX);
     gpio_disable_pulls(PROBE_UART0_RX);
-    uart_init(UART, PROBE_UART_BAUDRATE);
-    uart_set_hw_flow(UART, false, false);
+    uart_init(PH_FW_UART, PROBE_UART_BAUDRATE);
+    uart_set_hw_flow(PH_FW_UART, false, false);
     serial_rx_dma = dma_claim_unused_channel(true);
     serial_tx_dma = dma_claim_unused_channel(true);
     serial_lock = spin_lock_instance(spin_lock_claim_unused(true));
@@ -572,7 +572,7 @@ void ph_fw_target_swd_init(void)
         /* Set up divisor */
         ph_fw_target_swd_set_clk_freq(1000);
 
-        /* Jump SM to command dispatch routine, and enable it */
+        /* Jump PH_FW_SM to command dispatch routine, and enable it */
         pio_sm_exec(pio0, PROBE_SM, offset + probe_offset_get_next_cmd);
         pio_sm_set_enabled(pio0, PROBE_SM, 1);
         probe.initted = 1;
@@ -599,8 +599,8 @@ void ph_fw_target_swd_deinit(void)
 static bool target_ina_read(uint8_t reg, uint32_t *value, size_t count)
 {
     uint8_t bytes[3];
-    if (i2c_write_timeout_us(PH_FW_INA_I2C, INA_ADDR, &reg, 1, true, I2C_TIMEOUT_US) != 1 ||
-        i2c_read_timeout_us(PH_FW_INA_I2C, INA_ADDR, bytes, count, false, I2C_TIMEOUT_US) !=
+    if (i2c_write_timeout_us(PH_FW_INA_I2C, PH_FW_INA_ADDR, &reg, 1, true, PH_FW_I2C_TIMEOUT_US) != 1 ||
+        i2c_read_timeout_us(PH_FW_INA_I2C, PH_FW_INA_ADDR, bytes, count, false, PH_FW_I2C_TIMEOUT_US) !=
             (int)count)
         return false;
     *value = 0;
@@ -612,7 +612,7 @@ static bool target_ina_read(uint8_t reg, uint32_t *value, size_t count)
 static bool target_ina_write(uint8_t reg, uint16_t value)
 {
     uint8_t bytes[] = { reg, value >> 8, value & 0xff };
-    return i2c_write_timeout_us(PH_FW_INA_I2C, INA_ADDR, bytes, 3, false, I2C_TIMEOUT_US) == 3;
+    return i2c_write_timeout_us(PH_FW_INA_I2C, PH_FW_INA_ADDR, bytes, 3, false, PH_FW_I2C_TIMEOUT_US) == 3;
 }
 
 static bool target_ina_init(void)
@@ -633,7 +633,7 @@ void ph_fw_target_io_set_ready(bool ready)
     critical_section_enter_blocking(&io_lock);
     io_ready = ready;
     for (uint pin = 0; pin < 30; ++pin) {
-        if (CROSS_MASK & (1u << pin))
+        if (PH_FW_CROSS_MASK & (1u << pin))
             gpio_set_oeover(pin, ready ? GPIO_OVERRIDE_NORMAL : GPIO_OVERRIDE_LOW);
     }
     critical_section_exit(&io_lock);
@@ -723,7 +723,7 @@ void ph_fw_target_io_init(void)
 
     /* Keep every cross-domain pad gated until ph_fw_target_control_poll() approves it. */
     for (uint pin = 0; pin < 30; ++pin) {
-        if (CROSS_MASK & (1u << pin)) {
+        if (PH_FW_CROSS_MASK & (1u << pin)) {
             gpio_init(pin);
             gpio_disable_pulls(pin);
             gpio_set_oeover(pin, GPIO_OVERRIDE_LOW);

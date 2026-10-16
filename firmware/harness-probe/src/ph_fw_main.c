@@ -21,9 +21,9 @@
 #include "ph_fw_util.h"
 #include "ph_fw_worker.h"
 
-#define THREADED 1
+#define PH_FW_THREADED 1
 
-#define CONTROL_TASK_PRIO (tskIDLE_PRIORITY + 2)
+#define PH_FW_CONTROL_TASK_PRIO (tskIDLE_PRIORITY + 2)
 
 TaskHandle_t ph_fw_control_taskhandle;
 #if PICO_RP2040
@@ -37,13 +37,13 @@ void bi_decl_config(void)
     bi_decl(bi_1pin_with_name(PROBE_PIN_RESET, "PROBE RESET"));
     bi_decl(bi_1pin_with_name(PROBE_PIN_SWCLK, "PROBE SWCLK"));
     bi_decl(bi_1pin_with_name(PROBE_PIN_SWDIO, "PROBE SWDIO"));
-    bi_decl(bi_program_feature("PROBE UART INTERFACE " PH_FW_STR(PROBE_UART_INTERFACE)));
-    bi_decl(bi_program_feature("PROBE UART BAUDRATE " PH_FW_STR(PROBE_UART_BAUDRATE)));
-    bi_decl(bi_1pin_with_name(PROBE_UART_TX, "PROBE UART TX"));
-    bi_decl(bi_1pin_with_name(PROBE_UART_RX, "PROBE UART RX"));
+    bi_decl(bi_program_feature("PROBE PH_FW_UART INTERFACE " PH_FW_STR(PROBE_UART_INTERFACE)));
+    bi_decl(bi_program_feature("PROBE PH_FW_UART BAUDRATE " PH_FW_STR(PROBE_UART_BAUDRATE)));
+    bi_decl(bi_1pin_with_name(PROBE_UART_TX, "PROBE PH_FW_UART TX"));
+    bi_decl(bi_1pin_with_name(PROBE_UART_RX, "PROBE PH_FW_UART RX"));
 }
 
-void usb_watchdog_thread(void *ptr)
+void ph_fw_usb_watchdog_thread(void *ptr)
 {
     uint32_t sof[3];
     int i = 0;
@@ -97,7 +97,7 @@ static void tud_update(TickType_t *wake)
         xTaskNotifyWait(0, 0xFFFFFFFFu, NULL, 1);
 }
 
-void control_thread(void *ptr)
+void ph_fw_control_thread(void *ptr)
 {
     TickType_t wake;
 
@@ -130,11 +130,11 @@ int main(void)
 
     ph_fw_probe_info("Welcome to PicoHarness!\n");
 
-    if (THREADED) {
-        xTaskCreate(control_thread, "CTRL", configMINIMAL_STACK_SIZE, NULL, CONTROL_TASK_PRIO,
+    if (PH_FW_THREADED) {
+        xTaskCreate(ph_fw_control_thread, "CTRL", configMINIMAL_STACK_SIZE, NULL, PH_FW_CONTROL_TASK_PRIO,
                     &ph_fw_control_taskhandle);
 #if PICO_RP2040
-        xTaskCreate(usb_watchdog_thread, "WDOG", configMINIMAL_STACK_SIZE, NULL, CONTROL_TASK_PRIO,
+        xTaskCreate(ph_fw_usb_watchdog_thread, "WDOG", configMINIMAL_STACK_SIZE, NULL, PH_FW_CONTROL_TASK_PRIO,
                     &usb_watchdog_taskhandle);
 #endif
         vTaskStartScheduler();

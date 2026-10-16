@@ -10,14 +10,14 @@
 #include "ph_sump.h"
 #include "ph_fw_target.h"
 
-#define LA_CDC 1u
-#define LA_CHANNELS 16u
-#define TRIGGER_TIMEOUT_MS 5000u
+#define PH_FW_LA_CDC 1u
+#define PH_FW_LA_CHANNELS 16u
+#define PH_FW_TRIGGER_TIMEOUT_MS 5000u
 
 /* SUMP channel -> work-pin bit position (the same PH_FW_GPIO_MAP order the
  * capture engine uses for `ph_fw_la_sample`'s normalized words). */
 #define PH_SUMP_WPIN(debug_pin, work_pin) work_pin,
-static const uint8_t sump_wpin[LA_CHANNELS] = { PH_FW_GPIO_MAP(PH_SUMP_WPIN) };
+static const uint8_t sump_wpin[PH_FW_LA_CHANNELS] = { PH_FW_GPIO_MAP(PH_SUMP_WPIN) };
 
 /* SUMP registers. */
 static uint32_t reg_divider, reg_count, reg_flags;
@@ -54,17 +54,17 @@ static void cdc1_write(const uint8_t *data, size_t len)
 {
     size_t off = 0;
     while (off < len) {
-        uint32_t n = tud_cdc_n_write(LA_CDC, data + off, len - off);
+        uint32_t n = tud_cdc_n_write(PH_FW_LA_CDC, data + off, len - off);
         off += n;
         if (n == 0) {
             tight_loop_contents();
-            if (!tud_cdc_n_connected(LA_CDC))
+            if (!tud_cdc_n_connected(PH_FW_LA_CDC))
                 break;
         }
     }
     /* Do not flush here: flushing per ID reply would stall bulk streaming.
      * A single 4-byte ID will be delivered when the host reads it. */
-    tud_cdc_n_write_flush(LA_CDC);
+    tud_cdc_n_write_flush(PH_FW_LA_CDC);
 }
 
 static void sump_stream_sample(uint32_t idx)
@@ -72,7 +72,7 @@ static void sump_stream_sample(uint32_t idx)
     uint8_t word[4];
     uint32_t s = idx < sump_actual ? ph_fw_la_sample(idx) : 0;
     uint32_t w = 0;
-    for (uint32_t i = 0; i < LA_CHANNELS; ++i)
+    for (uint32_t i = 0; i < PH_FW_LA_CHANNELS; ++i)
         w |= ((s >> sump_wpin[i]) & 1u) << i;
     word[0] = (uint8_t)w;
     word[1] = (uint8_t)(w >> 8);
@@ -92,9 +92,9 @@ static void handle_run(void)
     uint8_t trigger = 0, pin = 0;
     if (reg_mask) {
         uint32_t bit = 0;
-        while (bit < LA_CHANNELS && !(reg_mask & (1u << bit)))
+        while (bit < PH_FW_LA_CHANNELS && !(reg_mask & (1u << bit)))
             ++bit;
-        if (bit == LA_CHANNELS)
+        if (bit == PH_FW_LA_CHANNELS)
             return; /* bad mask */
         trigger = (reg_value >> bit) & 1u ? 1u : 2u; /* rising : falling */
         pin = (uint8_t)sump_wpin[bit];
@@ -189,9 +189,9 @@ void ph_sump_init(void)
 void ph_sump_pump(void)
 {
     /* Parse commands from LA CDC. */
-    while (tud_cdc_n_available(LA_CDC)) {
+    while (tud_cdc_n_available(PH_FW_LA_CDC)) {
         uint8_t b;
-        tud_cdc_n_read(LA_CDC, &b, 1);
+        tud_cdc_n_read(PH_FW_LA_CDC, &b, 1);
         cmd_buf[cmd_pos++] = b;
         if (cmd_pos == 1)
             cmd_need = is_long(b) ? 5 : 1;
@@ -208,11 +208,11 @@ void ph_sump_pump(void)
             sump_stream_index = 0;
         }
         while (sump_stream_index < sump_expected) {
-            if (!tud_cdc_n_connected(LA_CDC)) {
+            if (!tud_cdc_n_connected(PH_FW_LA_CDC)) {
                 sump_streaming = 0;
                 break;
             }
-            if (tud_cdc_n_write_available(LA_CDC) >= 4)
+            if (tud_cdc_n_write_available(PH_FW_LA_CDC) >= 4)
                 sump_stream_sample(sump_stream_index++);
             else
                 break;
@@ -221,7 +221,7 @@ void ph_sump_pump(void)
         if (sump_stream_index >= sump_expected || !sump_streaming) {
             sump_done = 0;
             sump_streaming = 0;
-            tud_cdc_n_write_flush(LA_CDC);
+            tud_cdc_n_write_flush(PH_FW_LA_CDC);
         }
     }
 }
@@ -237,7 +237,7 @@ void ph_sump_worker(void)
         uint32_t count = sump_req_count, hz = sump_req_hz;
         uint8_t trigger = sump_req_trigger, pin = sump_req_pin;
         sump_req = 0;
-        if (ph_fw_la_start(count, hz, trigger, pin, TRIGGER_TIMEOUT_MS, false, &sump_epoch,
+        if (ph_fw_la_start(count, hz, trigger, pin, PH_FW_TRIGGER_TIMEOUT_MS, false, &sump_epoch,
                      sump_epoch, &sump_lares)) {
             __dmb();
         }

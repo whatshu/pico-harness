@@ -121,7 +121,7 @@ bool ph_fw_target_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length, 
 bool ph_fw_target_power_measure(int32_t values[4]);
 
 /* ------------------------------------------------------------------------
- * IO layer: compact serial bridge (DMA UART; USB identity in ph_fw_usb_serial)
+ * IO layer: compact serial bridge (DMA PH_FW_UART; USB identity in ph_fw_usb_serial)
  * ------------------------------------------------------------------------ */
 
 /* iSerialNumber string in the USB device descriptor; NUL terminated after
@@ -141,7 +141,7 @@ bool ph_fw_target_serial_status(uint8_t channel, uint16_t *rx_available, uint16_
  * IO layer: system-status LED
  * ------------------------------------------------------------------------ */
 
-/* Any module may pick the state the LED should convey; control_thread calls
+/* Any module may pick the state the LED should convey; ph_fw_control_thread calls
  * ph_fw_target_led_tick() once per loop to redraw the pattern.  The engine owns
  * the LED gpio, so callers never reach into the pins directly. */
 void ph_fw_target_led_init(void);
