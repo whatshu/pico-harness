@@ -7,8 +7,8 @@
 #include "ph_bulk.h"
 #include "ph_console.h"
 #include "ph_terminal.h"
-#include "target.h"
-#include "util.h"
+#include "ph_fw_target.h"
+#include "ph_fw_util.h"
 
 /* Frame layout and timing constants mirror firmware/harness-target
  * `src/pico_harness.c` (the Work side of this link); the Debug core is the
@@ -73,10 +73,10 @@ static void send(uint8_t kind, uint16_t sequence, const uint8_t *payload, size_t
     bytes[7] = (uint8_t)(size >> 8);
     if (size)
         memcpy(bytes + 8, payload, size);
-    uint16_t crc = crc16_ccitt(bytes + 2, size + 6);
+    uint16_t crc = ph_fw_crc16_ccitt(bytes + 2, size + 6);
     bytes[size + 8] = (uint8_t)crc;
     bytes[size + 9] = (uint8_t)(crc >> 8);
-    if (target_serial_write(0, bytes, size + 10) < size + 10)
+    if (ph_fw_target_serial_write(0, bytes, size + 10) < size + 10)
         return; /* Work UART fifo full; the write is partial at worst */
 }
 
@@ -128,7 +128,7 @@ static void parse_frames(bool expire)
             continue;
         }
         uint16_t got = rx_frame[size + 8] | ((uint16_t)rx_frame[size + 9] << 8);
-        if (crc16_ccitt(rx_frame + 2, size + 6) != got) {
+        if (ph_fw_crc16_ccitt(rx_frame + 2, size + 6) != got) {
             consume(1);
             continue;
         }
@@ -168,7 +168,7 @@ static void handle_frame(uint8_t kind, uint16_t frame_seq, const uint8_t *payloa
                 if (now < baud_switch_at)
                     busy_wait_until(baud_switch_at);
                 uint32_t actual;
-                target_serial_config(0, baud_target, 8, 1, 0, &actual);
+                ph_fw_target_serial_config(0, baud_target, 8, 1, 0, &actual);
                 current_baud = actual;
                 rx_len = 0; /* bytes buffered under the old rate are stale */
                 send(PH_KIND_BAUD_VERIFY, next_seq(), NULL, 0);
@@ -215,7 +215,7 @@ static void ph_console_baud_rollback(void)
 {
     ph_console_data_emit((const uint8_t *)"[baud] rollback\n", 16);
     uint32_t actual;
-    target_serial_config(0, baud_previous, 8, 1, 0, &actual);
+    ph_fw_target_serial_config(0, baud_previous, 8, 1, 0, &actual);
     current_baud = actual;
     rx_len = 0;
     baud_state = BAUDS_IDLE;
@@ -235,7 +235,7 @@ void ph_console_init(void)
     rx_len = 0;
     baud_state = BAUDS_IDLE;
     uint32_t baud = 115200;
-    target_serial_config(0, baud, 8, 1, 0, &baud);
+    ph_fw_target_serial_config(0, baud, 8, 1, 0, &baud);
     current_baud = baud;
 }
 
@@ -243,7 +243,7 @@ void ph_console_pump(void)
 {
     uint8_t chunk[32];
     for (int i = 0; i < 16; ++i) {
-        size_t n = target_serial_read(0, chunk, sizeof(chunk));
+        size_t n = ph_fw_target_serial_read(0, chunk, sizeof(chunk));
         if (!n)
             break;
         rx_last_at = time_us_64();
@@ -276,12 +276,12 @@ void ph_console_pump(void)
 
 void ph_console_write(const uint8_t *data, size_t len)
 {
-    if (!target_io_ready() || len == 0 || len > PH_CONSOLE_SHORT)
+    if (!ph_fw_target_io_ready() || len == 0 || len > PH_CONSOLE_SHORT)
         return;
     if (mode == PH_CONSOLE_HARNESS) {
         send(PH_KIND_CONSOLE_TX, next_seq(), data, len);
     } else {
-        target_serial_write(0, data, len);
+        ph_fw_target_serial_write(0, data, len);
     }
 }
 
@@ -325,7 +325,7 @@ bool ph_console_baud(uint32_t baud, uint32_t *actual)
 
     /* PLAIN mode — reconfigure directly. */
     uint32_t applied = baud;
-    if (!target_serial_config(0, baud, 8, 1, 0, &applied))
+    if (!ph_fw_target_serial_config(0, baud, 8, 1, 0, &applied))
         return false;
     current_baud = applied;
     *actual = applied;
@@ -344,6 +344,6 @@ void ph_console_reset(void)
     rx_len = 0;
     baud_state = BAUDS_IDLE;
     uint32_t baud = 115200;
-    target_serial_config(0, baud, 8, 1, 0, &baud);
+    ph_fw_target_serial_config(0, baud, 8, 1, 0, &baud);
     current_baud = baud;
 }

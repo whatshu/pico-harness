@@ -1,6 +1,6 @@
-/* Host-only hardware model used to execute target_control.c. */
-#ifndef PDBG_HARDWARE_STUB_H
-#define PDBG_HARDWARE_STUB_H
+/* Host-only hardware model used to execute ph_fw_target_control.c. */
+#ifndef PH_FW_HARDWARE_STUB_H
+#define PH_FW_HARDWARE_STUB_H
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -75,7 +75,7 @@ void dma_channel_configure(int channel, dma_channel_config *config, volatile voi
 void dma_start_channel_mask(uint32_t mask);
 bool dma_channel_is_busy(int channel);
 void dma_channel_abort(int channel);
-/* ---- target_io.c: UART/DMA ring engine ---- */
+/* ---- ph_fw_target_io.c: UART/DMA ring engine ---- */
 #define uart1 1
 #define UART_PARITY_NONE 0
 #define UART_PARITY_ODD 1
@@ -98,7 +98,7 @@ typedef struct {
     volatile uint32_t transfer_count;
 } dma_channel_hw_t;
 dma_channel_hw_t *dma_channel_hw_addr(int channel);
-/* ---- target_io.c: clocks / spin locks ---- */
+/* ---- ph_fw_target_io.c: clocks / spin locks ---- */
 enum clock_index { clk_sys, clk_peri };
 uint32_t clock_get_hz(enum clock_index clk);
 typedef int spin_lock_t;
@@ -106,13 +106,13 @@ int spin_lock_claim_unused(bool required);
 spin_lock_t *spin_lock_instance(int lock_num);
 uint32_t spin_lock_blocking(spin_lock_t *lock);
 void spin_unlock(spin_lock_t *lock, uint32_t irq);
-/* ---- target_io.c: unique id ---- */
+/* ---- ph_fw_target_io.c: unique id ---- */
 #define PICO_UNIQUE_BOARD_ID_SIZE_BYTES 8
 typedef struct {
     uint8_t id[PICO_UNIQUE_BOARD_ID_SIZE_BYTES];
 } pico_unique_board_id_t;
 void pico_get_unique_board_id(pico_unique_board_id_t *id_out);
-/* ---- target_io.c: SWD PIO engine ---- */
+/* ---- ph_fw_target_io.c: SWD PIO engine ---- */
 #define PIO_FDEBUG_TXSTALL_LSB 9
 #define PIO_FDEBUG_RXSTALL_LSB 24
 typedef struct {
@@ -142,7 +142,7 @@ void sm_config_set_out_shift(pio_sm_config *config, bool shift_right, bool autop
                              uint pull_threshold);
 void sm_config_set_in_shift(pio_sm_config *config, bool shift_right, bool autopush,
                             uint push_threshold);
-/* ---- target_io.c: LED tick uses FreeRTOS + tinyUSB ---- */
+/* ---- ph_fw_target_io.c: LED tick uses FreeRTOS + tinyUSB ---- */
 typedef uint32_t TickType_t;
 #define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
 TickType_t xTaskGetTickCount(void);

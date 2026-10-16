@@ -21,26 +21,26 @@
 #define PROBE_UART_INTERFACE PROBE_UART0_INTERFACE
 #define PROBE_USB_CONNECTED_LED 25
 
-#define PDBG_WORK_ENABLE_PIN 0
-#define PDBG_WORK_FAULT_PIN 1
-#define PDBG_WORK_RUN_PIN 22
-#define PDBG_WORK_BOOT_PIN 26
-#define PDBG_WORK_ADC_PIN 28
-#define PDBG_WORK_ADC_CHANNEL 2
-#define PDBG_INA_I2C i2c0
-#define PDBG_INA_SDA_PIN 4
-#define PDBG_INA_SCL_PIN 5
-#define PDBG_INA_ALERT_PIN 2
+#define PH_FW_WORK_ENABLE_PIN 0
+#define PH_FW_WORK_FAULT_PIN 1
+#define PH_FW_WORK_RUN_PIN 22
+#define PH_FW_WORK_BOOT_PIN 26
+#define PH_FW_WORK_ADC_PIN 28
+#define PH_FW_WORK_ADC_CHANNEL 2
+#define PH_FW_INA_I2C i2c0
+#define PH_FW_INA_SDA_PIN 4
+#define PH_FW_INA_SCL_PIN 5
+#define PH_FW_INA_ALERT_PIN 2
 
-#define PDBG_SPI_INTERFACE spi1
-#define PDBG_SPI_RX_PIN 8
-#define PDBG_SPI_CS_PIN 9
-#define PDBG_SPI_SCK_PIN 10
-#define PDBG_SPI_TX_PIN 11
+#define PH_FW_SPI_INTERFACE spi1
+#define PH_FW_SPI_RX_PIN 8
+#define PH_FW_SPI_CS_PIN 9
+#define PH_FW_SPI_SCK_PIN 10
+#define PH_FW_SPI_TX_PIN 11
 
-#define PDBG_GPIO_RAW_MASK 0x083f3fc8u
-#define PDBG_GPIO_CAPTURE_MASK 0x1c3ffc20u
-#define PDBG_GPIO_MAP(X) \
+#define PH_FW_GPIO_RAW_MASK 0x083f3fc8u
+#define PH_FW_GPIO_CAPTURE_MASK 0x1c3ffc20u
+#define PH_FW_GPIO_MAP(X) \
     X(3, 28)             \
     X(6, 27)             \
     X(7, 26)             \
@@ -59,14 +59,14 @@
     X(11, 20)
 
 #if PICO_RP2040
-#define PDBG_DEBUG_CORE "pico"
+#define PH_FW_DEBUG_CORE "pico"
 #define PROBE_PRODUCT_STRING "PicoHarness Pico (CMSIS-DAP)"
 #else
-#define PDBG_DEBUG_CORE "pico2"
+#define PH_FW_DEBUG_CORE "pico2"
 #define PROBE_PRODUCT_STRING "PicoHarness Pico 2 (CMSIS-DAP)"
 #endif
-#define PDBG_INFO_STRING                                                     \
-    "PicoHarness/4;dualcore;" PDBG_DEBUG_CORE                             \
+#define PH_FW_INFO_STRING                                                     \
+    "PicoHarness/4;dualcore;" PH_FW_DEBUG_CORE                             \
     ";pdbg-link;dedicated-core1;uart-dma;spi-dma;la-gusmanb;capture-status;" \
     "debug-bootsel;single-uart;spi1;gpio-capture;capture-timing;capture-async;capture-pretrigger;run;enable;" \
     "bootsel;power-good;power-fault;ina237;measure-v2;power-default-off"

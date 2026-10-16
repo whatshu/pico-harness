@@ -6,18 +6,18 @@
 #include "pico/stdlib.h"
 #include "tusb.h"
 
-#include "logic_analyzer.h"
+#include "ph_fw_la.h"
 #include "ph_sump.h"
-#include "target.h"
+#include "ph_fw_target.h"
 
 #define LA_CDC 1u
 #define LA_CHANNELS 16u
 #define TRIGGER_TIMEOUT_MS 5000u
 
-/* SUMP channel -> work-pin bit position (the same PDBG_GPIO_MAP order the
- * capture engine uses for `la_sample`'s normalized words). */
+/* SUMP channel -> work-pin bit position (the same PH_FW_GPIO_MAP order the
+ * capture engine uses for `ph_fw_la_sample`'s normalized words). */
 #define PH_SUMP_WPIN(debug_pin, work_pin) work_pin,
-static const uint8_t sump_wpin[LA_CHANNELS] = { PDBG_GPIO_MAP(PH_SUMP_WPIN) };
+static const uint8_t sump_wpin[LA_CHANNELS] = { PH_FW_GPIO_MAP(PH_SUMP_WPIN) };
 
 /* SUMP registers. */
 static uint32_t reg_divider, reg_count, reg_flags;
@@ -28,11 +28,11 @@ static volatile uint8_t sump_req, sump_cancel, sump_done;
 static volatile uint32_t sump_req_count, sump_req_hz;
 static volatile uint8_t sump_req_trigger, sump_req_pin;
 static volatile uint32_t sump_actual;
-static volatile uint32_t sump_epoch /* volatile for la_start */ ;
+static volatile uint32_t sump_epoch /* volatile for ph_fw_la_start */ ;
 static uint32_t sump_expected; /* core0: samples to stream */
 static uint8_t sump_streaming;
 static uint32_t sump_stream_index;
-static la_result_t sump_lares; /* core1 capture result slot */
+static ph_fw_la_result_t sump_lares; /* core1 capture result slot */
 
 /* SUMP command parser (max opcode+4 payload bytes). */
 static uint8_t cmd_buf[5];
@@ -70,7 +70,7 @@ static void cdc1_write(const uint8_t *data, size_t len)
 static void sump_stream_sample(uint32_t idx)
 {
     uint8_t word[4];
-    uint32_t s = idx < sump_actual ? la_sample(idx) : 0;
+    uint32_t s = idx < sump_actual ? ph_fw_la_sample(idx) : 0;
     uint32_t w = 0;
     for (uint32_t i = 0; i < LA_CHANNELS; ++i)
         w |= ((s >> sump_wpin[i]) & 1u) << i;
@@ -83,7 +83,7 @@ static void sump_stream_sample(uint32_t idx)
 
 static void handle_run(void)
 {
-    if (sump_req || sump_streaming || sump_done || la_busy())
+    if (sump_req || sump_streaming || sump_done || ph_fw_la_busy())
         return; /* busy */
     /* SUMP dividers follow the OLS convention with a 100 MHz reference; the
      * libsigrok ols driver computes divider = Fclk/f - 1 with Fclk = 100 MHz,
@@ -119,7 +119,7 @@ static void handle_reset(void)
     __dmb();
     sump_cancel = 1;
     reg_divider = 0;
-    reg_count = LA_SAMPLES / 4; /* a full buffer by default */
+    reg_count = PH_FW_LA_SAMPLES / 4; /* a full buffer by default */
     reg_flags = 0;
     reg_mask = reg_value = 0;
 }
@@ -149,7 +149,7 @@ static void dispatch(const uint8_t *c, uint8_t len)
     case 0x81:
         if (len == 5) {
             uint32_t c4 = c[1] | ((uint32_t)c[2] << 8) | ((uint32_t)c[3] << 16);
-            reg_count = c4 * 4u > LA_SAMPLES ? LA_SAMPLES : c4 * 4u;
+            reg_count = c4 * 4u > PH_FW_LA_SAMPLES ? PH_FW_LA_SAMPLES : c4 * 4u;
         }
         break;
     case 0x82:
@@ -178,7 +178,7 @@ static void dispatch(const uint8_t *c, uint8_t len)
 void ph_sump_init(void)
 {
     reg_divider = 0;
-    reg_count = LA_SAMPLES / 4;
+    reg_count = PH_FW_LA_SAMPLES / 4;
     reg_flags = 0;
     reg_mask = reg_value = 0;
     sump_req = sump_cancel = sump_done = 0;
@@ -229,19 +229,19 @@ void ph_sump_pump(void)
 void ph_sump_worker(void)
 {
     if (sump_cancel) {
-        la_cancel();
+        ph_fw_la_cancel();
         __dmb();
         sump_cancel = 0;
     }
-    if (sump_req && !la_busy() && !sump_done) {
+    if (sump_req && !ph_fw_la_busy() && !sump_done) {
         uint32_t count = sump_req_count, hz = sump_req_hz;
         uint8_t trigger = sump_req_trigger, pin = sump_req_pin;
         sump_req = 0;
-        if (la_start(count, hz, trigger, pin, TRIGGER_TIMEOUT_MS, false, &sump_epoch,
+        if (ph_fw_la_start(count, hz, trigger, pin, TRIGGER_TIMEOUT_MS, false, &sump_epoch,
                      sump_epoch, &sump_lares)) {
             __dmb();
         }
-    } else if (!sump_req && la_busy() && la_poll()) {
+    } else if (!sump_req && ph_fw_la_busy() && ph_fw_la_poll()) {
         /* Capture finished. Abort streaming on cancel; otherwise report the
          * captured sample count (0-padded in core0 if the trigger timed out). */
         if (!(sump_lares.flags & 8u)) {

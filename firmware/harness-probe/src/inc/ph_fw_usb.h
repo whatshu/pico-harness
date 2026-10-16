@@ -23,10 +23,10 @@ void tud_mount_cb(void);
 
 /* True while the DAP endpoint group is configured (tud_mount_cb) and has not
  * been torn down by a bus reset / unmount (tud_unmount_cb). */
-bool tusb_dap_configured(void);
+bool ph_fw_usb_dap_configured(void);
 
 /* Defined in main.c; the TinyUSB event callbacks above use it to wake the
  * control task.  Exposed here so tusb_handler.c can see it. */
-extern TaskHandle_t control_taskhandle;
+extern TaskHandle_t ph_fw_control_taskhandle;
 
 #endif

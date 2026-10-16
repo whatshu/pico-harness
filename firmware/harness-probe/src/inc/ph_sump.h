@@ -25,7 +25,7 @@ void ph_sump_init(void);
 void ph_sump_pump(void);
 
 /* core1: service the SUMP capture engine (start / poll / cancel). Call once
- * per worker iteration alongside la_poll duty. */
+ * per worker iteration alongside ph_fw_la_poll duty. */
 void ph_sump_worker(void);
 
 void ph_sump_reset(void);

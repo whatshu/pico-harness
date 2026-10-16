@@ -27,7 +27,7 @@
 
 #include "DAP_config.h"
 #include "DAP.h"
-#include "target.h"
+#include "ph_fw_target.h"
 
 /* Slight hack - we're not bitbashing so we need to set baudrate off the DAP's delay cycles.
  * Ideally we don't want calls to udiv everywhere... */
@@ -45,17 +45,17 @@ void SWJ_Sequence(uint32_t count, const uint8_t *data)
     uint32_t n;
 
     if (DAP_Data.clock_delay != cached_delay) {
-        target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
+        ph_fw_target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
         cached_delay = DAP_Data.clock_delay;
     }
-    probe_debug("SWJ sequence count = %d FDB=0x%2x\n", count, data[0]);
+    ph_fw_probe_debug("SWJ sequence count = %d FDB=0x%2x\n", count, data[0]);
     n = count;
     while (n > 0) {
         if (n > 8)
             bits = 8;
         else
             bits = n;
-        target_swd_write_bits(bits, *data++);
+        ph_fw_target_swd_write_bits(bits, *data++);
         n -= bits;
     }
 }
@@ -73,10 +73,10 @@ void SWD_Sequence(uint32_t info, const uint8_t *swdo, uint8_t *swdi)
     uint32_t n;
 
     if (DAP_Data.clock_delay != cached_delay) {
-        target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
+        ph_fw_target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
         cached_delay = DAP_Data.clock_delay;
     }
-    probe_debug("SWD sequence\n");
+    ph_fw_probe_debug("SWD sequence\n");
     n = info & SWD_SEQUENCE_CLK;
     if (n == 0U) {
         n = 64U;
@@ -88,7 +88,7 @@ void SWD_Sequence(uint32_t info, const uint8_t *swdo, uint8_t *swdi)
                 bits = 8;
             else
                 bits = n;
-            *swdi++ = target_swd_read_bits(bits);
+            *swdi++ = ph_fw_target_swd_read_bits(bits);
             n -= bits;
         }
     } else {
@@ -97,7 +97,7 @@ void SWD_Sequence(uint32_t info, const uint8_t *swdo, uint8_t *swdi)
                 bits = 8;
             else
                 bits = n;
-            target_swd_write_bits(bits, *swdo++);
+            ph_fw_target_swd_write_bits(bits, *swdo++);
             n -= bits;
         }
     }
@@ -119,10 +119,10 @@ uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
     uint32_t n;
 
     if (DAP_Data.clock_delay != cached_delay) {
-        target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
+        ph_fw_target_swd_set_clk_freq(MAKE_KHZ(DAP_Data.clock_delay));
         cached_delay = DAP_Data.clock_delay;
     }
-    probe_debug("SWD_transfer\n");
+    ph_fw_probe_debug("SWD_transfer\n");
     /* Generate the request packet */
     prq |= (1 << 0); /* Start Bit */
     for (n = 1; n < 5; n++) {
@@ -133,18 +133,18 @@ uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
     prq |= (parity & 0x1) << 5; /* Parity Bit */
     prq |= (0 << 6); /* Stop Bit */
     prq |= (1 << 7); /* Park bit */
-    target_swd_write_bits(8, prq);
+    ph_fw_target_swd_write_bits(8, prq);
 
     /* Turnaround (ignore read bits) */
-    ack = target_swd_read_bits(DAP_Data.swd_conf.turnaround + 3);
+    ack = ph_fw_target_swd_read_bits(DAP_Data.swd_conf.turnaround + 3);
     ack >>= DAP_Data.swd_conf.turnaround;
 
     if (ack == DAP_TRANSFER_OK) {
         /* Data transfer phase */
         if (request & DAP_TRANSFER_RnW) {
             /* Read RDATA[0:31] - note probe_read shifts to LSBs */
-            val = target_swd_read_bits(32);
-            bit = target_swd_read_bits(1);
+            val = ph_fw_target_swd_read_bits(32);
+            bit = ph_fw_target_swd_read_bits(1);
             parity = __builtin_popcount(val);
             if ((parity ^ bit) & 1U) {
                 /* Parity error */
@@ -152,20 +152,20 @@ uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
             }
             if (data)
                 *data = val;
-            probe_debug("Read %02x ack %02x 0x%08x parity %01x\n", prq, ack, val, bit);
+            ph_fw_probe_debug("Read %02x ack %02x 0x%08x parity %01x\n", prq, ack, val, bit);
             /* Turnaround for line idle */
-            target_swd_hiz_clocks(DAP_Data.swd_conf.turnaround);
+            ph_fw_target_swd_hiz_clocks(DAP_Data.swd_conf.turnaround);
         } else {
             /* Turnaround for write */
-            target_swd_hiz_clocks(DAP_Data.swd_conf.turnaround);
+            ph_fw_target_swd_hiz_clocks(DAP_Data.swd_conf.turnaround);
 
             /* Write WDATA[0:31] */
             val = *data;
-            target_swd_write_bits(32, val);
+            ph_fw_target_swd_write_bits(32, val);
             parity = __builtin_popcount(val);
             /* Write Parity Bit */
-            target_swd_write_bits(1, parity & 0x1);
-            probe_debug("write %02x ack %02x 0x%08x parity %01x\n", prq, ack, val, parity);
+            ph_fw_target_swd_write_bits(1, parity & 0x1);
+            ph_fw_probe_debug("write %02x ack %02x 0x%08x parity %01x\n", prq, ack, val, parity);
         }
         /* Capture Timestamp */
         if (request & DAP_TRANSFER_TIMESTAMP) {
@@ -176,10 +176,10 @@ uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
         if (DAP_Data.transfer.idle_cycles) {
             for (n = DAP_Data.transfer.idle_cycles; n;) {
                 if (n > 256) {
-                    target_swd_write_bits(256, 0);
+                    ph_fw_target_swd_write_bits(256, 0);
                     n -= 256;
                 } else {
-                    target_swd_write_bits(n, 0);
+                    ph_fw_target_swd_write_bits(n, 0);
                     n -= n;
                 }
             }
@@ -190,13 +190,13 @@ uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
     if ((ack == DAP_TRANSFER_WAIT) || (ack == DAP_TRANSFER_FAULT)) {
         if (DAP_Data.swd_conf.data_phase && ((request & DAP_TRANSFER_RnW) != 0U)) {
             /* Dummy Read RDATA[0:31] + Parity */
-            target_swd_read_bits(33);
+            ph_fw_target_swd_read_bits(33);
         }
-        target_swd_hiz_clocks(DAP_Data.swd_conf.turnaround);
+        ph_fw_target_swd_hiz_clocks(DAP_Data.swd_conf.turnaround);
         if (DAP_Data.swd_conf.data_phase && ((request & DAP_TRANSFER_RnW) == 0U)) {
             /* Dummy Write WDATA[0:31] + Parity */
-            target_swd_write_bits(32, 0);
-            target_swd_write_bits(1, 0);
+            ph_fw_target_swd_write_bits(32, 0);
+            ph_fw_target_swd_write_bits(1, 0);
         }
         return ((uint8_t)ack);
     }
@@ -204,7 +204,7 @@ uint8_t SWD_Transfer(uint32_t request, uint32_t *data)
     /* Protocol error */
     n = DAP_Data.swd_conf.turnaround + 32U + 1U;
     /* Back off data phase */
-    target_swd_read_bits(n);
+    ph_fw_target_swd_read_bits(n);
     return ((uint8_t)ack);
 }
 

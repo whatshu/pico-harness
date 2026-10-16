@@ -2,7 +2,7 @@
 #include <string.h>
 #include "hardware_stub.h"
 #include "pico_dualcore_config.h"
-#include "util.h"
+#include "ph_fw_util.h"
 static struct mock_io regs;
 struct mock_io *io_bank0_hw = &regs;
 unsigned levels[30], directions[30], overrides[30], pulls[30];
@@ -422,10 +422,10 @@ void sm_config_set_in_shift(pio_sm_config *config, bool shift_right, bool autopu
 }
 uint32_t mock_normalize(uint32_t sample)
 {
-    return normalize_gpio(sample);
+    return ph_fw_normalize_gpio(sample);
 }
 
 const char *mock_info(void)
 {
-    return PDBG_INFO_STRING;
+    return PH_FW_INFO_STRING;
 }

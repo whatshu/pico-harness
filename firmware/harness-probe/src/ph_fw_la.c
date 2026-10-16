@@ -9,14 +9,14 @@
 #include "hardware/pio.h"
 #include "pico/stdlib.h"
 
-#include "logic_analyzer.h"
+#include "ph_fw_la.h"
 #include "logic_analyzer.pio.h"
-#include "target.h"
-#include "util.h"
+#include "ph_fw_target.h"
+#include "ph_fw_util.h"
 
 #define SM 0
 
-static uint32_t capture_buffer[LA_SAMPLES];
+static uint32_t capture_buffer[PH_FW_LA_SAMPLES];
 static uint burst_offset, counted_offset;
 static int capture_dma, rewind_dma;
 static uint32_t ring_start;
@@ -25,9 +25,9 @@ static bool active_triggered;
 static uint32_t active_count, active_start, active_deadline, saved_bypass, capture_offset;
 static const volatile uint32_t *active_epoch;
 static uint32_t active_expected_epoch;
-static la_result_t *active_result;
+static ph_fw_la_result_t *active_result;
 
-void la_init(void)
+void ph_fw_la_init(void)
 {
     pio_sm_claim(pio1, SM);
     burst_offset = pio_add_program(pio1, &la_burst_program);
@@ -37,25 +37,25 @@ void la_init(void)
     ring_start = (uintptr_t)capture_buffer;
 
     for (uint pin = 0; pin < 30; ++pin)
-        if (PDBG_GPIO_RAW_MASK & (1u << pin))
+        if (PH_FW_GPIO_RAW_MASK & (1u << pin))
             gpio_set_input_enabled(pin, true);
 }
 
-bool la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pin, uint16_t timeout_ms,
+bool ph_fw_la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pin, uint16_t timeout_ms,
               bool bypass, const volatile uint32_t *epoch, uint32_t expected_epoch,
-              la_result_t *result)
+              ph_fw_la_result_t *result)
 {
     uint cycles = trigger ? 4 : 1;
     uint32_t clock = clock_get_hz(clk_sys);
 
-    if (active || !count || count > LA_SAMPLES || hz < 2500 || hz > clock / cycles || trigger > 2 ||
-        (trigger && (count < 4 || raw_pin >= 30 || !(PDBG_GPIO_RAW_MASK & (1u << raw_pin)) ||
+    if (active || !count || count > PH_FW_LA_SAMPLES || hz < 2500 || hz > clock / cycles || trigger > 2 ||
+        (trigger && (count < 4 || raw_pin >= 30 || !(PH_FW_GPIO_RAW_MASK & (1u << raw_pin)) ||
                      !timeout_ms || timeout_ms > 10000)))
         return false;
 
     /* Round up divider: actual sampling frequency never exceeds the request. */
     uint32_t div256 = ((uint64_t)clock * 256 + (uint64_t)hz * cycles - 1) / ((uint64_t)hz * cycles);
-    *result = (la_result_t){ .sample_hz = ((uint64_t)clock * 256) / (div256 * cycles),
+    *result = (ph_fw_la_result_t){ .sample_hz = ((uint64_t)clock * 256) / (div256 * cycles),
                              .flags = bypass ? 1u : 0u };
 
     /* Reset the sampler before selecting the triggered or immediate program. */
@@ -97,7 +97,7 @@ bool la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pin, uin
 
     /* Save the shared bypass register so this capture leaves other pins intact. */
     saved_bypass = pio1->input_sync_bypass;
-    hw_write_masked(&pio1->input_sync_bypass, bypass ? PDBG_GPIO_RAW_MASK : 0, PDBG_GPIO_RAW_MASK);
+    hw_write_masked(&pio1->input_sync_bypass, bypass ? PH_FW_GPIO_RAW_MASK : 0, PH_FW_GPIO_RAW_MASK);
     pio_interrupt_clear(pio1, 0);
     pio1->fdebug = 1u << (PIO_FDEBUG_RXSTALL_LSB + SM);
 
@@ -139,11 +139,11 @@ bool la_start(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pin, uin
     return true;
 }
 
-bool la_poll(void)
+bool ph_fw_la_poll(void)
 {
     if (!active)
         return true;
-    la_result_t *result = active_result;
+    ph_fw_la_result_t *result = active_result;
     uint32_t remaining = dma_channel_hw_addr(capture_dma)->transfer_count;
     uint32_t elapsed = time_us_32() - active_start;
     if (remaining > 8 && (pio1->fdebug & (1u << (PIO_FDEBUG_RXSTALL_LSB + SM))))
@@ -189,30 +189,30 @@ bool la_poll(void)
     return true;
 }
 
-bool la_busy(void)
+bool ph_fw_la_busy(void)
 {
     return active;
 }
-void la_cancel(void)
+void ph_fw_la_cancel(void)
 {
     if (active) {
         active_expected_epoch = ~*active_epoch;
-        la_poll();
+        ph_fw_la_poll();
     }
 }
 
-bool la_capture(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pin, uint16_t timeout_ms,
+bool ph_fw_la_capture(uint32_t count, uint32_t hz, uint8_t trigger, uint8_t raw_pin, uint16_t timeout_ms,
                 bool bypass, const volatile uint32_t *epoch, uint32_t expected_epoch,
-                la_result_t *result)
+                ph_fw_la_result_t *result)
 {
-    if (!la_start(count, hz, trigger, raw_pin, timeout_ms, bypass, epoch, expected_epoch, result))
+    if (!ph_fw_la_start(count, hz, trigger, raw_pin, timeout_ms, bypass, epoch, expected_epoch, result))
         return false;
-    while (!la_poll())
-        target_serial_poll();
+    while (!ph_fw_la_poll())
+        ph_fw_target_serial_poll();
     return true;
 }
 
-uint32_t la_sample(uint32_t index)
+uint32_t ph_fw_la_sample(uint32_t index)
 {
-    return normalize_gpio(capture_buffer[(capture_offset + index) % active_count]);
+    return ph_fw_normalize_gpio(capture_buffer[(capture_offset + index) % active_count]);
 }

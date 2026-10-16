@@ -49,7 +49,7 @@ This information includes:
 #include <pico/stdlib.h>
 
 #include "cmsis_compiler.h"
-#include "target.h"
+#include "ph_fw_target.h"
 
 /// Processor Clock of the Cortex-M MCU used in the Debug Unit.
 /// This value is used to calculate the SWD/JTAG clock speed.
@@ -327,7 +327,7 @@ Configures the DAP Hardware I/O pins for Serial Wire Debug (SWD) mode:
 extern volatile uint32_t cached_delay;
 __STATIC_INLINE void PORT_SWD_SETUP(void)
 {
-    target_swd_init();
+    ph_fw_target_swd_init();
     cached_delay = 0;
 }
 
@@ -337,7 +337,7 @@ Disables the DAP Hardware I/O pins which configures:
 */
 __STATIC_INLINE void PORT_OFF(void)
 {
-    target_swd_deinit();
+    ph_fw_target_swd_deinit();
 }
 
 // SWCLK/TCK I/O pin -------------------------------------
@@ -414,7 +414,7 @@ called prior \ref PIN_SWDIO_OUT function calls.
 */
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT_ENABLE(void)
 {
-    target_swd_write_mode();
+    ph_fw_target_swd_write_mode();
 }
 
 /** SWDIO I/O pin: Switch to Input mode (used in SWD mode only).
@@ -423,7 +423,7 @@ called prior \ref PIN_SWDIO_IN function calls.
 */
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT_DISABLE(void)
 {
-    target_swd_read_mode();
+    ph_fw_target_swd_read_mode();
 }
 
 // TDI Pin I/O ---------------------------------------------
@@ -482,7 +482,7 @@ __STATIC_FORCEINLINE void PIN_nTRST_OUT(uint32_t bit)
 __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN(void)
 {
 #ifdef PROBE_PIN_RESET
-    return target_swd_reset_level();
+    return ph_fw_target_swd_reset_level();
 #else
     return (0U);
 #endif
@@ -496,7 +496,7 @@ __STATIC_FORCEINLINE uint32_t PIN_nRESET_IN(void)
 __STATIC_FORCEINLINE void PIN_nRESET_OUT(uint32_t bit)
 {
 #ifdef PROBE_PIN_RESET
-    target_swd_assert_reset(!!bit);
+    ph_fw_target_swd_assert_reset(!!bit);
 #else
     (void)bit;
 #endif

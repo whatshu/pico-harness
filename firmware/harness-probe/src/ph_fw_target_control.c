@@ -9,7 +9,7 @@
  *
  *   "Is the Work rail powered AND healthy enough for the IO layer to drive?"
  *
- * That single decision feeds target_io_set_ready(), the gate that keeps every
+ * That single decision feeds ph_fw_target_io_set_ready(), the gate that keeps every
  * Work pin high-impedance while the rail is off.  All sensing (Work voltage,
  * enable/fault reads) and all actuation (enable/run/boot) reach the hardware
  * through the target_* API below; no controller registers are touched here.
@@ -21,15 +21,15 @@
  *     cross-domain drive, and we never restore it without a fresh poll.
  *
  * Core safety note: the poll cadence and the ADC are shared with core 1's
- * worker loop (see target_work_mv()), which is why re-evaluation is throttled
+ * worker loop (see ph_fw_target_work_mv()), which is why re-evaluation is throttled
  * and the ADC access is serialized inside the IO layer.
  */
 
-#include "target.h"
+#include "ph_fw_target.h"
 
 static uint32_t last_poll_us;
 
-void target_control_poll(void)
+void ph_fw_target_control_poll(void)
 {
     uint32_t now = time_us_32();
 
@@ -37,25 +37,25 @@ void target_control_poll(void)
         return;
 
     last_poll_us = now;
-    bool ready = target_work_mv() >= 2800 && gpio_get(PDBG_WORK_ENABLE_PIN) &&
-                 gpio_get(PDBG_WORK_FAULT_PIN);
+    bool ready = ph_fw_target_work_mv() >= 2800 && gpio_get(PH_FW_WORK_ENABLE_PIN) &&
+                 gpio_get(PH_FW_WORK_FAULT_PIN);
 
-    if (ready != target_io_ready())
-        target_io_set_ready(ready);
+    if (ready != ph_fw_target_io_ready())
+        ph_fw_target_io_set_ready(ready);
 }
 
-void target_power_set(bool enabled)
+void ph_fw_target_power_set(bool enabled)
 {
     /* Remove all cross-domain drive BEFORE cutting the branch supply. */
-    target_io_set_ready(false);
-    gpio_put(PDBG_WORK_ENABLE_PIN, enabled);
+    ph_fw_target_io_set_ready(false);
+    gpio_put(PH_FW_WORK_ENABLE_PIN, enabled);
 
     if (enabled) {
         busy_wait_ms(20);
         last_poll_us = time_us_32() - 5000;
-        target_control_poll();
+        ph_fw_target_control_poll();
     } else {
-        gpio_put(PDBG_WORK_RUN_PIN, false);
-        gpio_put(PDBG_WORK_BOOT_PIN, false);
+        gpio_put(PH_FW_WORK_RUN_PIN, false);
+        gpio_put(PH_FW_WORK_BOOT_PIN, false);
     }
 }

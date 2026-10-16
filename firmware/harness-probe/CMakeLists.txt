@@ -26,13 +26,13 @@ if (${PICO_SDK_VERSION_MAJOR} LESS 2)
 endif ()
 
 add_executable(harness-probe
-        src/main.c
-        src/swd.c
-        src/tusb_handler.c
-        src/worker.c
-        src/util.c
-        src/target_io.c
-        src/target_control.c
+        src/ph_fw_main.c
+        src/ph_fw_swd.c
+        src/ph_fw_usb.c
+        src/ph_fw_worker.c
+        src/ph_fw_util.c
+        src/ph_fw_target_io.c
+        src/ph_fw_target_control.c
         src/ph_terminal.c
         src/ph_console.c
         src/ph_sump.c
@@ -83,14 +83,14 @@ target_compile_definitions (harness-probe PRIVATE
 
 if (PICO_BOARD STREQUAL "pico_dualcore" OR PICO_BOARD STREQUAL "pico_dualcore_pico")
     if (PICO_BOARD STREQUAL "pico_dualcore_pico")
-        set(PDBG_DEBUG_CORE "pico")
+        set(PH_FW_DEBUG_CORE "pico")
     else ()
-        set(PDBG_DEBUG_CORE "pico2")
+        set(PH_FW_DEBUG_CORE "pico2")
     endif ()
-    set_target_properties(harness-probe PROPERTIES OUTPUT_NAME "pico_dualcore_debug_${PDBG_DEBUG_CORE}")
-    pico_set_program_name(harness-probe "PicoHarness Debug (${PDBG_DEBUG_CORE})")
+    set_target_properties(harness-probe PROPERTIES OUTPUT_NAME "pico_dualcore_debug_${PH_FW_DEBUG_CORE}")
+    pico_set_program_name(harness-probe "PicoHarness Debug (${PH_FW_DEBUG_CORE})")
     target_link_libraries(harness-probe PRIVATE hardware_adc)
-    target_sources(harness-probe PRIVATE src/logic_analyzer.c)
+    target_sources(harness-probe PRIVATE src/ph_fw_la.c)
     target_compile_definitions(harness-probe PRIVATE PICO_CORE1_STACK_SIZE=4096)
     pico_generate_pio_header(harness-probe ${CMAKE_CURRENT_LIST_DIR}/src/pio/logic_analyzer.pio)
 else ()

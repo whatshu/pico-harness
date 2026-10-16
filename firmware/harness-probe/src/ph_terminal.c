@@ -11,9 +11,9 @@
 #include "ph_bulk.h"
 #include "ph_console.h"
 #include "ph_terminal.h"
-#include "target.h"
-#include "util.h"
-#include "worker.h"
+#include "ph_fw_target.h"
+#include "ph_fw_util.h"
+#include "ph_fw_worker.h"
 
 #define PH_TX_RING 1024u
 
@@ -214,11 +214,11 @@ static void exec_get_info(uint32_t seq)
 static void exec_get_status(uint32_t seq)
 {
     ph_get_status_t st = picoharness_v1_GetStatus_init_default;
-    st.power_enabled = gpio_get(PDBG_WORK_ENABLE_PIN) != 0;
-    uint16_t mv = target_work_mv();
+    st.power_enabled = gpio_get(PH_FW_WORK_ENABLE_PIN) != 0;
+    uint16_t mv = ph_fw_target_work_mv();
     st.power_good = mv >= 2800;
-    st.ina_alert = !gpio_get(PDBG_INA_ALERT_PIN);
-    st.work_fault = !gpio_get(PDBG_WORK_FAULT_PIN);
+    st.ina_alert = !gpio_get(PH_FW_INA_ALERT_PIN);
+    st.work_fault = !gpio_get(PH_FW_WORK_FAULT_PIN);
     st.vbus_mv = mv;
     ph_send_body(seq, PH_STATUS_OK, picoharness_v1_PhMessage_get_status_tag,
                  &st, sizeof(st));
@@ -226,7 +226,7 @@ static void exec_get_status(uint32_t seq)
 
 static void exec_power_set(uint32_t seq, const ph_power_set_t *ps)
 {
-    target_power_set(ps->enabled);
+    ph_fw_target_power_set(ps->enabled);
     ph_send_status(seq, PH_STATUS_OK);
 }
 
@@ -236,41 +236,41 @@ static void exec_reset_pulse(uint32_t seq, const ph_reset_pulse_t *rp)
         ph_send_status(seq, PH_STATUS_ERR_ARG);
         return;
     }
-    gpio_put(PDBG_WORK_RUN_PIN, true);
-    gpio_set_dir(PDBG_WORK_RUN_PIN, GPIO_OUT);
+    gpio_put(PH_FW_WORK_RUN_PIN, true);
+    gpio_set_dir(PH_FW_WORK_RUN_PIN, GPIO_OUT);
     busy_wait_ms(rp->duration_ms);
-    gpio_put(PDBG_WORK_RUN_PIN, false);
+    gpio_put(PH_FW_WORK_RUN_PIN, false);
     ph_send_status(seq, PH_STATUS_OK);
 }
 
 static void exec_bootsel_set(uint32_t seq, const ph_bootsel_set_t *bs)
 {
-    gpio_put(PDBG_WORK_BOOT_PIN, bs->asserted);
-    gpio_set_dir(PDBG_WORK_BOOT_PIN, GPIO_OUT);
+    gpio_put(PH_FW_WORK_BOOT_PIN, bs->asserted);
+    gpio_set_dir(PH_FW_WORK_BOOT_PIN, GPIO_OUT);
     ph_send_status(seq, PH_STATUS_OK);
 }
 
 static void exec_enter_bootsel(uint32_t seq)
 {
-    if (!target_io_ready()) {
+    if (!ph_fw_target_io_ready()) {
         ph_send_status(seq, PH_STATUS_ERR_NOTREADY);
         return;
     }
-    gpio_put(PDBG_WORK_RUN_PIN, true);
-    gpio_set_dir(PDBG_WORK_RUN_PIN, GPIO_OUT);
-    gpio_put(PDBG_WORK_BOOT_PIN, true);
-    gpio_set_dir(PDBG_WORK_BOOT_PIN, GPIO_OUT);
+    gpio_put(PH_FW_WORK_RUN_PIN, true);
+    gpio_set_dir(PH_FW_WORK_RUN_PIN, GPIO_OUT);
+    gpio_put(PH_FW_WORK_BOOT_PIN, true);
+    gpio_set_dir(PH_FW_WORK_BOOT_PIN, GPIO_OUT);
     busy_wait_ms(10);
-    gpio_put(PDBG_WORK_RUN_PIN, false);
+    gpio_put(PH_FW_WORK_RUN_PIN, false);
     busy_wait_ms(10);
-    gpio_put(PDBG_WORK_BOOT_PIN, false);
+    gpio_put(PH_FW_WORK_BOOT_PIN, false);
     ph_send_status(seq, PH_STATUS_OK);
 }
 
 static void exec_measure(uint32_t seq)
 {
     int32_t values[4];
-    if (!target_power_measure(values)) {
+    if (!ph_fw_target_power_measure(values)) {
         ph_send_status(seq, PH_STATUS_ERR_NOTREADY);
         return;
     }
@@ -286,7 +286,7 @@ static void exec_measure(uint32_t seq)
 static void exec_gpio_read(uint32_t seq)
 {
     ph_gpio_read_t g = picoharness_v1_GpioRead_init_default;
-    g.mask = normalize_gpio(gpio_get_all());
+    g.mask = ph_fw_normalize_gpio(gpio_get_all());
     ph_send_body(seq, PH_STATUS_OK, picoharness_v1_PhMessage_gpio_read_tag,
                  &g, sizeof(g));
 }
@@ -311,7 +311,7 @@ static void exec_gpio_diag(uint32_t seq, const ph_gpio_diag_t *gd)
 
 static void exec_console_tx(uint32_t seq, const ph_console_tx_t *tx)
 {
-    if (!target_io_ready()) {
+    if (!ph_fw_target_io_ready()) {
         ph_send_status(seq, PH_STATUS_ERR_NOTREADY);
         return;
     }
@@ -340,7 +340,7 @@ static void exec_term_status(uint32_t seq)
 {
     uint16_t rx_available, tx_space;
     uint32_t overruns;
-    if (!target_serial_status(0, &rx_available, &tx_space, &overruns)) {
+    if (!ph_fw_target_serial_status(0, &rx_available, &tx_space, &overruns)) {
         ph_send_status(seq, PH_STATUS_ERR_ARG);
         return;
     }
@@ -412,7 +412,7 @@ void ph_msg_execute(const uint8_t *payload, size_t len)
         exec_gpio_diag(req.seq, &req.body.gpio_diag);
         break;
     case picoharness_v1_PhMessage_debug_bootsel_tag:
-        ph_request_self_bootsel();
+        ph_fw_request_self_bootsel();
         ph_send_status(req.seq, PH_STATUS_OK);
         break;
     case picoharness_v1_PhMessage_bulk_tx_begin_tag:

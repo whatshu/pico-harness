@@ -19,10 +19,10 @@
 #include "DAP_config.h"
 #include "FreeRTOS.h"
 #include "semphr.h"
-#include "target.h"
+#include "ph_fw_target.h"
 #include "task.h"
-#include "tusb_handler.h"
-#include "worker.h"
+#include "ph_fw_usb.h"
+#include "ph_fw_worker.h"
 
 #define DAP_TASK_PRIO (tskIDLE_PRIORITY + 1)
 
@@ -169,7 +169,7 @@ char const *string_desc_arr[] = {
     (const char[]){ 0x09, 0x04 }, /* 0: is supported language is English (0x0409) */
     "Raspberry Pi", /* 1: Manufacturer */
     PROBE_PRODUCT_STRING, /* 2: Product */
-    usb_serial, /* 3: Serial, uses flash unique ID */
+    ph_fw_usb_serial, /* 3: Serial, uses flash unique ID */
     "CMSIS-DAP v2 Interface", /* 4: Interface descriptor for Bulk transport */
     "PH Terminal", /* 5: PH protocol channel (control/console/coordination) */
     "PH Terminal Bulk", /* 6: raw payload data plane */
@@ -294,7 +294,7 @@ uint8_t const *tud_descriptor_bos_cb(void)
     return desc_bos;
 }
 
-bool tusb_dap_configured(void)
+bool ph_fw_usb_dap_configured(void)
 {
     return was_configured;
 }
@@ -309,9 +309,9 @@ void tud_event_hook_cb(uint8_t rhport, uint32_t eventid, bool in_isr)
     (void)eventid;
     BaseType_t woken;
     if (in_isr) {
-        xTaskNotifyFromISR(control_taskhandle, 0, 0, &woken);
+        xTaskNotifyFromISR(ph_fw_control_taskhandle, 0, 0, &woken);
     } else {
-        xTaskNotify(control_taskhandle, 0, 0);
+        xTaskNotify(ph_fw_control_taskhandle, 0, 0);
     }
 }
 
@@ -350,8 +350,8 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
 
 void tud_suspend_cb(bool remote_wakeup_en)
 {
-    target_led_set_mode(TARGET_LED_OFF);
-    probe_info("Suspended\n");
+    ph_fw_target_led_set_mode(PH_FW_LED_OFF);
+    ph_fw_probe_info("Suspended\n");
     /* Were we actually configured? If not, threads don't exist */
     if (was_configured) {
         vTaskSuspend(dap_taskhandle);
@@ -361,8 +361,8 @@ void tud_suspend_cb(bool remote_wakeup_en)
 
 void tud_resume_cb(void)
 {
-    target_led_set_mode(TARGET_LED_IDLE);
-    probe_info("Resumed\n");
+    ph_fw_target_led_set_mode(PH_FW_LED_IDLE);
+    ph_fw_probe_info("Resumed\n");
     if (was_configured) {
         vTaskResume(dap_taskhandle);
     }
@@ -370,11 +370,11 @@ void tud_resume_cb(void)
 
 void tud_unmount_cb(void)
 {
-    target_led_set_mode(TARGET_LED_OFF);
-    worker_reset();
+    ph_fw_target_led_set_mode(PH_FW_LED_OFF);
+    ph_fw_worker_reset();
     if (!was_configured)
         return;
-    probe_info("Disconnected/reset\n");
+    ph_fw_probe_info("Disconnected/reset\n");
     vTaskSuspend(dap_taskhandle);
     vTaskDelete(dap_taskhandle);
     was_configured = 0;
@@ -382,8 +382,8 @@ void tud_unmount_cb(void)
 
 void tud_mount_cb(void)
 {
-    target_led_set_mode(TARGET_LED_IDLE);
-    probe_info("Connected, Configured: %d\n", !!was_configured);
+    ph_fw_target_led_set_mode(PH_FW_LED_IDLE);
+    ph_fw_probe_info("Connected, Configured: %d\n", !!was_configured);
     if (!was_configured) {
         /* Lowest priority thread is debug - need to shuffle buffers before we can toggle swd... */
         xTaskCreate(dap_thread, "DAP", configMINIMAL_STACK_SIZE, NULL, DAP_TASK_PRIO,
@@ -424,7 +424,7 @@ static bool dap_edpt_deinit(void)
 
 static void dap_edpt_reset(uint8_t __unused rhport)
 {
-    probe_info("dap_edpt_reset\n");
+    ph_fw_probe_info("dap_edpt_reset\n");
     memset(&usb_request_buffer, 0, sizeof(usb_request_buffer));
     memset(&usb_response_buffer, 0, sizeof(usb_response_buffer));
 
@@ -547,7 +547,7 @@ static void dap_thread(void *ptr)
              */
             n = usb_request_buffer.read_idx;
             while (usb_request_buffer.data[n % DAP_PACKET_COUNT][0] == ID_DAP_QueueCommands) {
-                probe_info("%lu %lu DAP queued cmd %s len %02x\n", usb_request_buffer.write_idx,
+                ph_fw_probe_info("%lu %lu DAP queued cmd %s len %02x\n", usb_request_buffer.write_idx,
                            usb_request_buffer.read_idx,
                            dap_cmd_string[usb_request_buffer.data[n % DAP_PACKET_COUNT][0]],
                            usb_request_buffer.data[n % DAP_PACKET_COUNT][1]);
@@ -555,12 +555,12 @@ static void dap_thread(void *ptr)
                 n++;
                 while (n == usb_request_buffer.write_idx) {
                     /* Need yield in a loop here, as IN callbacks will also wake the thread */
-                    probe_info("DAP wait\n");
+                    ph_fw_probe_info("DAP wait\n");
                     vTaskSuspend(dap_taskhandle);
                 }
             }
             /* Read the next request from the ring. */
-            probe_info("%lu %lu DAP cmd %s len %02x\n", usb_request_buffer.write_idx,
+            ph_fw_probe_info("%lu %lu DAP cmd %s len %02x\n", usb_request_buffer.write_idx,
                        usb_request_buffer.read_idx,
                        dap_cmd_string[*RD_SLOT_PTR(usb_request_buffer)],
                        *(RD_SLOT_PTR(usb_request_buffer) + 1));
@@ -579,7 +579,7 @@ static void dap_thread(void *ptr)
                                           WR_SLOT_PTR(usb_response_buffer)) &
                        0xffff;
             usb_request_buffer.read_idx++;
-            probe_info("%lu %lu DAP resp %s len %u\n", usb_response_buffer.write_idx,
+            ph_fw_probe_info("%lu %lu DAP resp %s len %u\n", usb_response_buffer.write_idx,
                        usb_response_buffer.read_idx,
                        dap_cmd_string[*WR_SLOT_PTR(usb_response_buffer)], resp_len);
 

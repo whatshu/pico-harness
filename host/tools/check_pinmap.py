@@ -17,18 +17,18 @@ EXPECTED = {
     "PROBE_PIN_RESET": 22,
     "PROBE_UART0_TX": 20,
     "PROBE_UART0_RX": 21,
-    "PDBG_WORK_ENABLE_PIN": 0,
-    "PDBG_WORK_FAULT_PIN": 1,
-    "PDBG_WORK_RUN_PIN": 22,
-    "PDBG_WORK_BOOT_PIN": 26,
-    "PDBG_WORK_ADC_PIN": 28,
-    "PDBG_INA_SDA_PIN": 4,
-    "PDBG_INA_SCL_PIN": 5,
-    "PDBG_INA_ALERT_PIN": 2,
-    "PDBG_SPI_RX_PIN": 8,
-    "PDBG_SPI_CS_PIN": 9,
-    "PDBG_SPI_SCK_PIN": 10,
-    "PDBG_SPI_TX_PIN": 11,
+    "PH_FW_WORK_ENABLE_PIN": 0,
+    "PH_FW_WORK_FAULT_PIN": 1,
+    "PH_FW_WORK_RUN_PIN": 22,
+    "PH_FW_WORK_BOOT_PIN": 26,
+    "PH_FW_WORK_ADC_PIN": 28,
+    "PH_FW_INA_SDA_PIN": 4,
+    "PH_FW_INA_SCL_PIN": 5,
+    "PH_FW_INA_ALERT_PIN": 2,
+    "PH_FW_SPI_RX_PIN": 8,
+    "PH_FW_SPI_CS_PIN": 9,
+    "PH_FW_SPI_SCK_PIN": 10,
+    "PH_FW_SPI_TX_PIN": 11,
 }
 
 
@@ -68,7 +68,7 @@ def main() -> int:
         actual = macro_value(config, name)
         if actual != expected:
             raise AssertionError(f"{name}: expected {expected}, got {actual}")
-    if "#define PDBG_GPIO_CAPTURE_MASK 0x1c3ffc20u" not in config:
+    if "#define PH_FW_GPIO_CAPTURE_MASK 0x1c3ffc20u" not in config:
         raise AssertionError("dualcore GPIO capture mask is missing")
     selftest = SELFTEST.read_text()
     for text in ("gpio_set_function(12, GPIO_FUNC_UART)",

@@ -15,17 +15,17 @@
 
 #include "DAP.h"
 #include "FreeRTOS.h"
-#include "target.h"
+#include "ph_fw_target.h"
 #include "task.h"
-#include "tusb_handler.h"
-#include "util.h"
-#include "worker.h"
+#include "ph_fw_usb.h"
+#include "ph_fw_util.h"
+#include "ph_fw_worker.h"
 
 #define THREADED 1
 
 #define CONTROL_TASK_PRIO (tskIDLE_PRIORITY + 2)
 
-TaskHandle_t control_taskhandle;
+TaskHandle_t ph_fw_control_taskhandle;
 #if PICO_RP2040
 static TaskHandle_t usb_watchdog_taskhandle;
 #endif
@@ -33,12 +33,12 @@ static TaskHandle_t usb_watchdog_taskhandle;
 void bi_decl_config(void)
 {
     bi_decl(bi_program_version_string(PROBE_VERSION));
-    bi_decl(bi_program_feature(PDBG_INFO_STRING));
+    bi_decl(bi_program_feature(PH_FW_INFO_STRING));
     bi_decl(bi_1pin_with_name(PROBE_PIN_RESET, "PROBE RESET"));
     bi_decl(bi_1pin_with_name(PROBE_PIN_SWCLK, "PROBE SWCLK"));
     bi_decl(bi_1pin_with_name(PROBE_PIN_SWDIO, "PROBE SWDIO"));
-    bi_decl(bi_program_feature("PROBE UART INTERFACE " PDBG_STR(PROBE_UART_INTERFACE)));
-    bi_decl(bi_program_feature("PROBE UART BAUDRATE " PDBG_STR(PROBE_UART_BAUDRATE)));
+    bi_decl(bi_program_feature("PROBE UART INTERFACE " PH_FW_STR(PROBE_UART_INTERFACE)));
+    bi_decl(bi_program_feature("PROBE UART BAUDRATE " PH_FW_STR(PROBE_UART_BAUDRATE)));
     bi_decl(bi_1pin_with_name(PROBE_UART_TX, "PROBE UART TX"));
     bi_decl(bi_1pin_with_name(PROBE_UART_RX, "PROBE UART RX"));
 }
@@ -63,7 +63,7 @@ void usb_watchdog_thread(void *ptr)
 
         if ((sof[0] | sof[1] | sof[2]) != 0) {
             if ((sof[0] == sof[1]) && (sof[1] == sof[2])) {
-                probe_info("Watchdog timeout! Resetting USBD\n");
+                ph_fw_probe_info("Watchdog timeout! Resetting USBD\n");
                 /* uh oh, signal disconnect (implicitly resets the controller) */
                 tud_deinit(0);
                 /* Make sure the port got the message */
@@ -86,7 +86,7 @@ static void tud_update(TickType_t *wake)
     tud_task();
 
     /* implied bus-reset detection */
-    if (!tud_connected() && tusb_dap_configured())
+    if (!tud_connected() && ph_fw_usb_dap_configured())
         tud_unmount_cb();
 
     /* If suspended or disconnected, unconditional delay for 1ms (20 ticks) */
@@ -101,13 +101,13 @@ void control_thread(void *ptr)
 {
     TickType_t wake;
 
-    target_led_init();
+    ph_fw_target_led_init();
     wake = xTaskGetTickCount();
 
     do {
         tud_update(&wake);
-        worker_step();
-        target_led_tick();
+        ph_fw_worker_step();
+        ph_fw_target_led_tick();
     } while (1);
 }
 
@@ -116,23 +116,23 @@ int main(void)
     /* Declare pins in binary information */
     bi_decl_config();
 
-    target_io_init();
+    ph_fw_target_io_init();
     board_init();
-    target_serial_init();
-    worker_init();
+    ph_fw_target_serial_init();
+    ph_fw_worker_init();
     tusb_init();
 #if LIB_PICO_STDIO_UART
     stdio_uart_init();
 #endif
 
     DAP_Setup();
-    multicore_launch_core1(worker_thread);
+    multicore_launch_core1(ph_fw_worker_thread);
 
-    probe_info("Welcome to PicoHarness!\n");
+    ph_fw_probe_info("Welcome to PicoHarness!\n");
 
     if (THREADED) {
         xTaskCreate(control_thread, "CTRL", configMINIMAL_STACK_SIZE, NULL, CONTROL_TASK_PRIO,
-                    &control_taskhandle);
+                    &ph_fw_control_taskhandle);
 #if PICO_RP2040
         xTaskCreate(usb_watchdog_thread, "WDOG", configMINIMAL_STACK_SIZE, NULL, CONTROL_TASK_PRIO,
                     &usb_watchdog_taskhandle);

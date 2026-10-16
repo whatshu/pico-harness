@@ -6,8 +6,8 @@
 #include "ph_bulk.h"
 #include "ph_console.h"
 #include "ph_terminal.h"
-#include "target.h"
-#include "util.h"
+#include "ph_fw_target.h"
+#include "ph_fw_util.h"
 
 /* Ring indices are monotonic positions, masked only when indexing the array;
  * the serial RX path in target_io.c uses the same scheme. */
@@ -179,7 +179,7 @@ void ph_bulk_worker(void)
             ph_bulk_done(false, 0);
         return; /* ph_bulk_on_uart will move us to TRANSFER */
     case PH_WORK_SPI_TRANSFER:
-        if (!target_spi_transfer(block_tx, block_rx, block_len, bulk_spi_yield)) {
+        if (!ph_fw_target_spi_transfer(block_tx, block_rx, block_len, bulk_spi_yield)) {
             ph_bulk_done(false, 0);
             return;
         }
@@ -206,7 +206,7 @@ void ph_bulk_on_uart(uint8_t kind, uint16_t seq, const uint8_t *payload, size_t 
             ws_state = PH_WORK_SPI_TRANSFER;
     } else if (kind == PH_BULK_CRC && ws_state == PH_WORK_SPI_WAIT_CRC && size == 2) {
         uint16_t got = (uint16_t)(payload[0] | (payload[1] << 8));
-        if (got != crc16_ccitt(block_tx, block_len)) {
+        if (got != ph_fw_crc16_ccitt(block_tx, block_len)) {
             ph_bulk_done(false, 0);
             return;
         }
