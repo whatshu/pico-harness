@@ -5,7 +5,7 @@ use crate::{
     i18n::I18n,
     live,
     model::{push, Device, Page},
-    panel, ACCENT, MUTED, RED,
+    panel, ACCENT, HOT, MUTED, RED,
 };
 use eframe::egui::{self, Color32, RichText};
 
@@ -445,7 +445,13 @@ fn console_status(ui: &mut egui::Ui, d: &Device, l: &I18n) {
                 }),
                 d.baud,
             ),
-            if d.work_verified { ACCENT } else { MUTED },
+            if d.uart_active() {
+                HOT
+            } else if d.work_verified {
+                ACCENT
+            } else {
+                MUTED
+            },
         );
         status_icon(
             ui,
@@ -464,7 +470,13 @@ fn console_status(ui: &mut egui::Ui, d: &Device, l: &I18n) {
                     "GP18–21 · idle / no pending bulk"
                 }),
             ),
-            if d.work_bulk_ready { ACCENT } else { MUTED },
+            if d.bulk_active() {
+                HOT
+            } else if d.work_verified {
+                ACCENT
+            } else {
+                MUTED
+            },
         );
     });
     ui.add_space(5.);

@@ -7,6 +7,8 @@ pub const BORDER: Color32 = Color32::from_rgb(66, 69, 75);
 pub const TEXT: Color32 = Color32::from_rgb(216, 218, 222);
 pub const MUTED: Color32 = Color32::from_rgb(148, 153, 161);
 pub const ACCENT: Color32 = Color32::from_rgb(133, 176, 208);
+// Brighter accent for a channel that is actively carrying traffic.
+pub const HOT: Color32 = Color32::from_rgb(186, 226, 255);
 pub const RED: Color32 = Color32::from_rgb(219, 114, 114);
 
 pub fn install(ctx: &egui::Context) {

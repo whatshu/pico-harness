@@ -415,6 +415,9 @@ pub struct Device {
     pub console_framed: bool,
     pub work_verified: bool,
     pub work_bulk_ready: bool,
+    /// Last UART / SPI payload seen on the wire, for the activity lights.
+    pub uart_active_at: Option<std::time::Instant>,
+    pub bulk_active_at: Option<std::time::Instant>,
     pub baud: u32,
     pub baud_draft: u32,
     pub baud_pending: bool,
@@ -465,6 +468,19 @@ pub struct Device {
     pub live_memory_address: Option<u32>,
 }
 impl Device {
+    /// A channel is "occupied" for a short window after its last payload.
+    pub fn uart_active(&self) -> bool {
+        Self::recent(self.uart_active_at)
+    }
+
+    pub fn bulk_active(&self) -> bool {
+        Self::recent(self.bulk_active_at)
+    }
+
+    fn recent(at: Option<std::time::Instant>) -> bool {
+        at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
+    }
+
     pub fn base(id: String, name: String) -> Self {
         Self {
             id,
@@ -497,6 +513,8 @@ impl Device {
             console_framed: false,
             work_verified: false,
             work_bulk_ready: false,
+            uart_active_at: None,
+            bulk_active_at: None,
             baud: 115200,
             baud_draft: 115200,
             baud_pending: false,
@@ -984,6 +1002,12 @@ impl Device {
                     direction,
                     bytes,
                 } => {
+                    let at = std::time::Instant::now();
+                    match bus {
+                        "UART" => self.uart_active_at = Some(at),
+                        "SPI" => self.bulk_active_at = Some(at),
+                        _ => {}
+                    }
                     let decoder = if direction == "TX" {
                         &mut self.trace_tx
                     } else {
