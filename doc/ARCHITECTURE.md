@@ -124,7 +124,7 @@ P1 已完成并实机验证(RP2040 Debug core,`/dev/ttyACM*` + pyusb 实测):
 | P1 host | `host/ph-bridge`(prost + framing + `PhClient`)、`host/phbridge`(python)、`host/tests` 离线+实机测试、`build.sh test` 接入 | ✅ 完成,`./build.sh test --offline` 绿 |
 | P2 控制台桥 | console 的 pico_harness 模式(Hello 发现、`0x02` 帧化、`0x90` 事件)+ 波特率事务(0x03-0x05,prepare/verify/commit+回滚)+ `ph` CLI;bulk `WORK_SPI` 转发归 P3 | ✅ 实机验证:REPL 交互 + 波特率往返(460800/115200/230400) |
 | P3 bulk | `WORK_SPI` 转发(host→Work,块式 0x06/0x86/SPI/0x87 + 整体 CRC-32C)+ `ph bulk` CLI;Work→host 读回 | 🔶 host→Work ✅ 实机(100B/5000B 多块);读回 ⬜ |
-| P3 LA | CDC2 SUMP(libsigrok `ols`)、PulseView 验证 | ⬜ |
+| P3 LA | CDC2 SUMP(libsigrok `ols`,ID `1ALS`)、PulseView 验证 | 🔶 sigrok `--scan` 识别成功、已产出采集;数据校准与 PulseView 复核待设备恢复后 |
 | P4 desktop | desktop 切 `ph_bridge`、`device_control` 提取、`host/pdbg` 退役、PyO3 绑定 | ⬜ |
 | P5 改名 | 全仓 `ph_<子前缀>_` 统一 | ⬜(新代码已按 `ph_`) |
 

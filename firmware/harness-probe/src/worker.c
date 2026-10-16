@@ -9,6 +9,7 @@
 #include "logic_analyzer.h"
 #include "ph_bulk.h"
 #include "ph_console.h"
+#include "ph_sump.h"
 #include "ph_terminal.h"
 #include "target.h"
 #include "worker.h"
@@ -26,6 +27,7 @@ void worker_init(void)
     ph_terminal_init();
     ph_bulk_init();
     ph_console_init();
+    ph_sump_init();
 
     /* The LA engine is kept armed for the SUMP phase; la_init claims PIO1. */
     la_init();
@@ -36,6 +38,7 @@ void worker_reset(void)
     ph_terminal_reset();
     ph_bulk_reset();
     ph_console_reset();
+    ph_sump_reset();
     debug_boot_requested = false;
     debug_boot_deadline = 0;
 }
@@ -45,6 +48,7 @@ void worker_step(void)
     /* Core 0 owns board monitoring, power policy and the USB pumps. */
     target_control_poll();
     ph_bulk_pump_rx();
+    ph_sump_pump();
     ph_terminal_pump();
 
     if (debug_boot_requested) {
@@ -68,6 +72,7 @@ void worker_thread(void)
 
         ph_terminal_worker();
         ph_bulk_worker();
+        ph_sump_worker();
         la_poll();
         tight_loop_contents();
     }
