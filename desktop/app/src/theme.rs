@@ -211,6 +211,18 @@ fn decorate_icon(
     paint_icon(ui, response, icon, color);
 }
 
+/// Brightness for a channel indicator: unsupported is dim, supported is
+/// accent, and a channel that just carried a payload is brightest.
+pub fn channel_color(supported: bool, active: bool) -> Color32 {
+    if active {
+        HOT
+    } else if supported {
+        ACCENT
+    } else {
+        MUTED
+    }
+}
+
 /// Connection indicators reveal their full status on hover.
 pub fn status_icon(ui: &mut egui::Ui, icon: Icon, label: &str, detail: &str, color: Color32) {
     let (_, response) = ui.allocate_exact_size(
@@ -558,5 +570,21 @@ mod terminal_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod channel_color_tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_is_dim_supported_is_accent_active_is_hot() {
+        assert_eq!(channel_color(false, false), MUTED);
+        // A supported channel lights up even with no traffic (the SPI case
+        // that used to render dim next to "Automatic bulk supported").
+        assert_eq!(channel_color(true, false), ACCENT);
+        assert_eq!(channel_color(true, true), HOT);
+        // Activity wins over the unsupported state.
+        assert_eq!(channel_color(false, true), HOT);
     }
 }

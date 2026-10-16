@@ -22,7 +22,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-pub use theme::{badge, panel, ACCENT, BORDER, HOT, MUTED, PANEL, RED};
+pub use theme::{badge, channel_color, panel, ACCENT, BORDER, HOT, MUTED, PANEL, RED};
 pub fn export(name: &str, bytes: impl AsRef<[u8]>) -> Result<(), String> {
     if let Some(path) = rfd::FileDialog::new().set_file_name(name).save_file() {
         std::fs::write(path, bytes).map_err(|e| e.to_string())?;
