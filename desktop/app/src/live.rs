@@ -337,7 +337,7 @@ fn run(
                     }
                 }
             }
-            next_uart = now + Duration::from_millis(50);
+            next_uart = now + Duration::from_millis(10);
         }
         match commands.recv_timeout(Duration::from_millis(10)) {
             Ok(command) => {

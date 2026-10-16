@@ -53,7 +53,7 @@ pub struct SerialTransport {
 impl SerialTransport {
     pub fn open(path: &str) -> Result<Self, PhError> {
         let port = serialport::new(path, 115_200)
-            .timeout(Duration::from_millis(50))
+            .timeout(Duration::from_millis(2))
             .open()?;
         Ok(Self { port })
     }
@@ -134,7 +134,7 @@ impl<T: Transport> PhClient<T> {
             if Instant::now() >= deadline {
                 return Err(PhError::Timeout(self.timeout));
             }
-            let mut tmp = [0u8; 64];
+            let mut tmp = [0u8; 256];
             let n = self.transport.recv(&mut tmp)?;
             if n > 0 {
                 self.fb.extend(&tmp[..n]);
@@ -147,6 +147,29 @@ impl<T: Transport> PhClient<T> {
         self.events.drain(..).collect()
     }
 
+    /// Read for up to `max_wait`, returning as soon as anything has been
+    /// parsed. The console poll uses this so it pays no fixed latency when the
+    /// Work core answers immediately.
+    pub fn recv_events_short(&mut self, max_wait: Duration) -> Vec<PhMessage> {
+        let deadline = Instant::now() + max_wait;
+        loop {
+            if !self.events.is_empty() || Instant::now() >= deadline {
+                break;
+            }
+            if let Some(frame) = self.fb.try_next().unwrap_or(None) {
+                self.events.push_back(frame);
+                continue;
+            }
+            let mut tmp = [0u8; 256];
+            if let Ok(n) = self.transport.recv(&mut tmp) {
+                if n > 0 {
+                    self.fb.extend(&tmp[..n]);
+                }
+            }
+        }
+        self.events.drain(..).collect()
+    }
+
     /// Wait up to `duration` for unsolicited events (no request sent).
     /// Used by the console reader to watch for work output.
     pub fn recv_events(&mut self, duration: Duration) -> Vec<PhMessage> {
@@ -156,7 +179,7 @@ impl<T: Transport> PhClient<T> {
                 self.events.push_back(frame);
                 continue;
             }
-            let mut tmp = [0u8; 64];
+            let mut tmp = [0u8; 256];
             if let Ok(n) = self.transport.recv(&mut tmp) {
                 if n > 0 {
                     self.fb.extend(&tmp[..n]);

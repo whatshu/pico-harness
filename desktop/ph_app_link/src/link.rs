@@ -224,7 +224,7 @@ impl PhBoardLink {
         let mut out = Vec::new();
         for event in self
             .client
-            .recv_events(std::time::Duration::from_millis(200))
+            .recv_events_short(std::time::Duration::from_millis(6))
         {
             if let Some(ph_message::Body::ConsoleData(d)) = event.body {
                 out.extend_from_slice(&d.data);
