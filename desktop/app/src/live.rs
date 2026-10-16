@@ -291,8 +291,20 @@ fn run(
                 }
                 Err(error) => {
                     failures += 1;
-                    if failures >= 3 {
-                        return Err(format!("PDBG status: {error}"));
+                    // A transient miss must not kill the session: the link is
+                    // still usable and the next poll usually recovers. Only
+                    // give up after a long silence (device unplugged).
+                    powered = false;
+                    // Report the first miss and then sparsely, so a long
+                    // outage is visible without flooding the console log.
+                    if failures == 1 || failures % 10 == 0 {
+                        let _ = events.send(Event::Error {
+                            operation: "Link",
+                            message: error.to_string(),
+                        });
+                    }
+                    if failures >= 40 {
+                        return Err(format!("PH status: {error}"));
                     }
                 }
             }

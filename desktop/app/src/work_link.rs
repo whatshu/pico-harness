@@ -223,6 +223,8 @@ pub struct Link {
     last_rx: Instant,
     bulk_ready: bool,
     discovery_started: Option<Instant>,
+    /// Last time the console state was read from the device.
+    status_polled_at: Option<Instant>,
     discovery_complete: bool,
     cancel: Option<Arc<AtomicBool>>,
 }
@@ -239,6 +241,7 @@ impl Link {
             last_rx: Instant::now(),
             bulk_ready: false,
             discovery_started: None,
+            status_polled_at: None,
             discovery_complete: framed,
             cancel: None,
         };
@@ -300,7 +303,16 @@ impl Link {
     }
     pub fn poll(&mut self, io: &mut impl Io) -> Result<(), String> {
         let discovery_started = *self.discovery_started.get_or_insert_with(Instant::now);
-        if let Ok((mode, baud)) = io.term_status() {
+        // The console state changes rarely; query it at most every 500 ms so
+        // the 50 ms poll loop stays cheap for the device.
+        let due = self
+            .status_polled_at
+            .is_none_or(|t| t.elapsed() >= Duration::from_millis(500));
+        if due {
+            self.status_polled_at = Some(Instant::now());
+        }
+        if due {
+            if let Ok((mode, baud)) = io.term_status() {
             let changed = self.framed != (mode == 1) || self.negotiated != (mode == 1);
             self.framed = mode == 1;
             self.negotiated = mode == 1;
@@ -309,6 +321,7 @@ impl Link {
             }
             if changed {
                 self.state();
+            }
             }
         }
         let bytes = io.uart_read()?;
