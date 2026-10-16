@@ -4,6 +4,7 @@
 #include "hardware/clocks.h"
 #include "pico/stdlib.h"
 
+#include "ph_bulk.h"
 #include "ph_console.h"
 #include "ph_terminal.h"
 #include "target.h"
@@ -22,6 +23,10 @@
 #define PH_KIND_BAUD_VERIFY_ACK 0x84
 #define PH_KIND_BAUD_COMMIT 0x05
 #define PH_KIND_BAUD_COMMIT_ACK 0x85
+/* pico_harness bulk replies (forwarded to ph_bulk for the SPI data plane). */
+#define PH_KIND_BULK_PREPARE_ACK 0x86
+#define PH_KIND_BULK_CRC 0x87
+#define PH_KIND_BULK_RX_ACK 0x88
 
 #define BAUD_SWITCH_DELAY_US 100000u
 #define BAUD_PREPARE_TIMEOUT_US 1000000u
@@ -194,6 +199,11 @@ static void handle_frame(uint8_t kind, uint16_t frame_seq, const uint8_t *payloa
             baud_state = BAUDS_IDLE;
         }
         break;
+    case PH_KIND_BULK_PREPARE_ACK:
+    case PH_KIND_BULK_CRC:
+    case PH_KIND_BULK_RX_ACK:
+        ph_bulk_on_uart(kind, frame_seq, payload, size);
+        break;
     default:
         break;
     }
@@ -212,6 +222,11 @@ static void ph_console_baud_rollback(void)
 }
 
 /* ------------------------------------------------------------------ */
+
+void ph_console_uart_send(uint8_t kind, const uint8_t *payload, size_t size)
+{
+    send(kind, next_seq(), payload, size);
+}
 
 void ph_console_init(void)
 {

@@ -29,9 +29,14 @@ void ph_bulk_flush_tx(void);
  * CRC check, emit BulkTxDone). Call once per worker iteration. */
 void ph_bulk_worker(void);
 
-/* core1: begin a bulk RX transaction. Accepts PH_ROUTE_DEBUG only in this
- * phase; request size must fit the ring and no transaction may be running. */
+/* core1: begin a bulk RX transaction. Accepts PH_ROUTE_DEBUG (buffered,
+ * integrity-checked) and PH_ROUTE_WORK_SPI (forwarded to Work over the
+ * pico_harness SPI bulk path, harness mode required). */
 bool ph_bulk_rx_begin(uint32_t route, uint32_t length, uint32_t crc);
+
+/* core1: pico_harness bulk replies (`0x86`/`0x87`/`0x88`) parsed on the Work
+ * UART by ph_console are handed here to advance the WORK_SPI forward FSM. */
+void ph_bulk_on_uart(uint8_t kind, uint16_t seq, const uint8_t *payload, size_t size);
 
 bool ph_bulk_busy(void);
 

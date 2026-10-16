@@ -33,6 +33,8 @@ pub enum PhError {
     Disconnected,
     #[error("serial port: {0}")]
     Serial(#[from] serialport::Error),
+    #[error("USB error: {0}")]
+    Usb(#[from] rusb::Error),
 }
 
 /// A byte pipe with blocking `send`/`recv` semantics (0 bytes = no data yet).

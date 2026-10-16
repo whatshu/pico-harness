@@ -32,6 +32,10 @@ typedef enum {
 
 void ph_console_init(void);
 
+/* core1: send one low-level pico_harness frame on the Work UART (used by the
+ * bulk data plane for `0x06` prepares). */
+void ph_console_uart_send(uint8_t kind, const uint8_t *payload, size_t size);
+
 /* core1: advance UART RX parsing, Hello detection and the baud transaction.
  * Call once per worker iteration after target_serial_poll(). */
 void ph_console_pump(void);

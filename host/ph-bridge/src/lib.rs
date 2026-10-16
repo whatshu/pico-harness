@@ -7,14 +7,17 @@
 //! - `client` : `PhClient` — request/response + unsolicited-event handling over a
 //!              byte transport (a `PH Terminal` CDC serial port in practice)
 //! - `device` : device discovery on Linux/macOS (sysfs)
+//! - `bulk`   : `BulkWriter` — raw payloads on the `PH Terminal Bulk` interface
 //!
 //! Naming follows the repository convention: `ph_` / `Ph_` public symbols.
 
+pub mod bulk;
 pub mod client;
 pub mod device;
 pub mod framing;
 pub mod msg;
 
+pub use bulk::BulkWriter;
 pub use client::{PhClient, PhError};
 pub use msg::{GetInfo, GetStatus, Measure, PhMessage, Status};
 

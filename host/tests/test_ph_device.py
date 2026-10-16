@@ -63,6 +63,7 @@ class PhTerminal:
 
         self.s = serial.Serial(port, 115200, timeout=0.2)
         self.buf = b""
+        self.events = []
         self.seq = 0
 
     def request(self, build, timeout=2.0) -> pb.PhMessage | None:
@@ -83,14 +84,25 @@ class PhTerminal:
                 ln = self.buf[0]
                 if len(self.buf) < 1 + ln:
                     break
-                out = pb.PhMessage()
-                out.ParseFromString(self.buf[1 : 1 + ln])
+                try:
+                    out = pb.PhMessage()
+                    out.ParseFromString(self.buf[1 : 1 + ln])
+                except Exception:
+                    self.buf = self.buf[1:]  # resync one byte
+                    continue
                 self.buf = self.buf[1 + ln :]
                 if out.seq == self.seq:
                     return out
+                if out.seq == 0:  # unsolicited event: hold for wait_event
+                    self.events.append(out)
+                    continue
         return None
 
     def wait_event(self, kind: str, timeout=2.0) -> pb.PhMessage | None:
+        # Drain events that arrived while a request was awaiting its reply.
+        for i, ev in enumerate(self.events):
+            if ev.WhichOneof("body") == kind:
+                return self.events.pop(i)
         deadline = time.time() + timeout
         while time.time() < deadline:
             chunk = self.s.read(512)
@@ -103,11 +115,17 @@ class PhTerminal:
                 ln = self.buf[0]
                 if len(self.buf) < 1 + ln:
                     break
-                out = pb.PhMessage()
-                out.ParseFromString(self.buf[1 : 1 + ln])
+                try:
+                    out = pb.PhMessage()
+                    out.ParseFromString(self.buf[1 : 1 + ln])
+                except Exception:
+                    self.buf = self.buf[1:]
+                    continue
                 self.buf = self.buf[1 + ln :]
                 if out.WhichOneof("body") == kind:
                     return out
+                if out.seq == 0:
+                    self.events.append(out)
         return None
 
 
@@ -148,7 +166,9 @@ class PhDeviceTests(unittest.TestCase):
         cls.port = find_terminal()
         if cls.port is None:
             raise unittest.SkipTest("no PicoHarness probe connected (PH Terminal)")
-        cls.ph = PhTerminal(cls.port)
+
+    def setUp(self):
+        self.ph = PhTerminal(self.port)
 
     def test_get_info(self):
         r = self.ph.request(b_getinfo)
@@ -210,6 +230,57 @@ class PhDeviceTests(unittest.TestCase):
             done = self.ph.wait_event("bulk_tx_done", timeout=2.5)
             self.assertIsNotNone(done)
             self.assertTrue(done.bulk_tx_done.ok, "firmware rejected the payload")
+            self.assertEqual(done.bulk_tx_done.crc_recv, crc)
+        finally:
+            usb.util.release_interface(dev, BULK_IFNUM)
+
+    def test_bulk_work_spi(self):
+        """Route WORK_SPI: the Debug core forwards the payload to a harness
+        Work core over SPI. Requires a pico_harness Work firmware; skipped
+        otherwise (probe for a harness console reply first)."""
+        import serial
+
+        # Harness-mode probe: power the rail, let Work announce its idle Hello
+        # (mode PLAIN->HARNESS), then a console `info` must visibly reply.
+        self.ph.request(b_power_on)
+        time.sleep(2.5)  # boot + Hello announcement window
+
+        def b_info(m):
+            m.console_tx.data = b"info\n"
+
+        self.ph.request(b_info)
+        echoed = self.ph.wait_event("console_data", timeout=3.0)
+        if echoed is None:
+            self.skipTest("Work core not running a pico_harness console here")
+
+        payload = bytes((i * 7) & 0xFF for i in range(5000))  # multi-block
+        crc = crc32c(payload)
+
+        def b_begin(m):
+            m.bulk_tx_begin.route = 1  # ROUTE_WORK_SPI
+            m.bulk_tx_begin.length = len(payload)
+            m.bulk_tx_begin.crc32c = crc
+
+        r = self.ph.request(b_begin)
+        self.assertEqual(r.status, 0)
+
+        dev = usb.core.find(idVendor=VID, idProduct=PID)
+        itf = None
+        for i in dev.get_active_configuration():
+            if i.bInterfaceNumber == BULK_IFNUM:
+                itf = i
+        self.assertIsNotNone(itf)
+        usb.util.claim_interface(dev, BULK_IFNUM)
+        try:
+            ep_out = usb.util.find_descriptor(
+                itf,
+                custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress)
+                == usb.util.ENDPOINT_OUT,
+            )
+            ep_out.write(payload, timeout=10000)
+            done = self.ph.wait_event("bulk_tx_done", timeout=5.0)
+            self.assertIsNotNone(done)
+            self.assertTrue(done.bulk_tx_done.ok, "WORK_SPI forwarding rejected")
             self.assertEqual(done.bulk_tx_done.crc_recv, crc)
         finally:
             usb.util.release_interface(dev, BULK_IFNUM)

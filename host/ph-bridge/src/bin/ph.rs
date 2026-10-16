@@ -52,7 +52,7 @@ fn main() {
     let mut cmd: Vec<&str> = args[1..].iter().map(|s| s.as_str()).collect();
     let mut explicit_port: Option<&str> = None;
     const COMMANDS: &[&str] = &[
-        "device", "power", "measure", "status", "console", "term", "bootsel",
+        "device", "power", "measure", "status", "console", "term", "bulk", "bootsel",
     ];
     if !COMMANDS.contains(&cmd[0]) {
         explicit_port = Some(cmd.remove(0));
@@ -102,12 +102,66 @@ fn main() {
             let actual = client.term_config(baud, 8, 1, 0).expect("term config");
             println!("actual={actual}");
         }
+        ["bulk", file] => bulk_send(&mut client, file),
         ["bootsel"] => {
             client.debug_bootsel().expect("bootsel");
             println!("requested self-bootsel");
         }
         _ => usage(),
     }
+}
+
+fn crc32c(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &b in data {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0x82f6_3b78u32 & (crc & 1).wrapping_neg());
+        }
+    }
+    !crc
+}
+
+/// Send a file to the Work core via the bulk data plane (route WORK_SPI):
+/// BulkTxBegin on the CDC, the raw payload on the vendor bulk interface, then
+/// drain for the BulkTxDone event and report its CRC verdict.
+fn bulk_send(
+    client: &mut PhClient<ph_bridge::client::SerialTransport>,
+    file: &str,
+) {
+    use std::time::Duration;
+    use ph_bridge::BulkWriter;
+    use ph_bridge::device;
+    use ph_bridge::msg::ph_message;
+    use ph_bridge::msg::Route;
+
+    let data = std::fs::read(file).expect("read file");
+    let crc = crc32c(&data);
+    client
+        .bulk_tx_begin(Route::WorkSpi, data.len() as u32, crc)
+        .expect("bulk begin");
+
+    let serial = device::scan().into_iter().next().and_then(|d| d.serial);
+    let mut writer = BulkWriter::open(serial.as_deref()).expect("open PH Terminal Bulk");
+    writer.write(&data).expect("write payload");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    while std::time::Instant::now() < deadline {
+        for ev in client.recv_events(Duration::from_millis(200)) {
+            if let Some(ph_message::Body::BulkTxDone(done)) = ev.body {
+                println!(
+                    "bulk done: ok={} crc_recv=0x{:08x} expected=0x{:08x}",
+                    done.ok, done.crc_recv, crc
+                );
+                if !done.ok {
+                    std::process::exit(1);
+                }
+                return;
+            }
+        }
+    }
+    eprintln!("no BulkTxDone event within 8s");
+    std::process::exit(1);
 }
 
 /// Consume queued events; used to watch Work console output that arrives as
