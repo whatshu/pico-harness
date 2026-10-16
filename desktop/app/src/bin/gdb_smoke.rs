@@ -1,5 +1,5 @@
 //! Explicit hardware checks. Downloads SRAM images only; Flash fixtures must be preloaded.
-use picoharness_desktop::gdb::{mi::quote, Config, Event, Request, Session};
+use ph_app::gdb::{mi::quote, Config, Event, Request, Session};
 use std::{
     collections::HashSet,
     process::{Command, Stdio},

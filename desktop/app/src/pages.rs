@@ -742,7 +742,7 @@ fn live_swd(ui: &mut egui::Ui, d: &mut Device, l: &I18n, notice: &mut String) {
         }
         1 => {
             ui.horizontal_wrapped(|ui| {
-                use picoharness_desktop::memory_export;
+                use ph_app::memory_export;
                 ui.label(l.tr("Address"));
                 let address_input = ui.add(
                     egui::TextEdit::singleline(&mut d.mem_address)
@@ -793,7 +793,7 @@ fn live_swd(ui: &mut egui::Ui, d: &mut Device, l: &I18n, notice: &mut String) {
                 }
             });
             crate::theme::row(ui, |ui| {
-                use picoharness_desktop::memory_export::{self, Format};
+                use ph_app::memory_export::{self, Format};
                 ui.label(l.tr("Export length"));
                 ui.add(
                     egui::DragValue::new(&mut d.mem_export_length)
@@ -814,7 +814,7 @@ fn live_swd(ui: &mut egui::Ui, d: &mut Device, l: &I18n, notice: &mut String) {
                     )
                     .clicked()
                 {
-                    let result = picoharness_desktop::memory_export::parse_address(&d.mem_address)
+                    let result = ph_app::memory_export::parse_address(&d.mem_address)
                         .map_err(|e| e.to_string())
                         .and_then(|address| {
                             memory_export::validate_range(address, d.mem_export_length)?;
@@ -882,7 +882,7 @@ fn live_swd(ui: &mut egui::Ui, d: &mut Device, l: &I18n, notice: &mut String) {
                     .clicked()
                 {
                     match (
-                        picoharness_desktop::memory_export::parse_address(&d.mem_address),
+                        ph_app::memory_export::parse_address(&d.mem_address),
                         parse_hex(&d.mem_edit),
                     ) {
                         (Ok(base), Ok(bytes))

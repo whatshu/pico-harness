@@ -1,6 +1,6 @@
 use crate::{export, file_pick, i18n::I18n, model::Device, BORDER, MUTED, RED};
 use eframe::egui::{self, Color32, RichText, Stroke};
-use picoharness_desktop::telemetry::{self, ChartViewport, Sample, MAX_SAMPLE_GAP};
+use ph_app::telemetry::{self, ChartViewport, Sample, MAX_SAMPLE_GAP};
 
 const COLORS: [Color32; 3] = [
     Color32::from_rgb(215, 179, 95),

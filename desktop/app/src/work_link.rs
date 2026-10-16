@@ -1,6 +1,6 @@
 //! Unified Work console: UART commands/short messages, SPI/DMA bulk messages.
 use crate::live::Event;
-use device_control::PdbgLink;
+use ph_app_link::PhBoardLink;
 use std::{
     collections::VecDeque,
     sync::{
@@ -30,7 +30,7 @@ pub trait Io {
     fn spi_config(&mut self) -> Result<(), String>;
     fn spi_transfer(&mut self, data: &[u8]) -> Result<Vec<u8>, String>;
 }
-impl Io for PdbgLink {
+impl Io for PhBoardLink {
     fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
         self.uart_config(0, baud, 8, 1, 0)
             .map_err(|e| e.to_string())
@@ -1147,7 +1147,7 @@ mod tests {
     #[ignore = "Requires the harness-signals Work firmware and a connected PicoHarness probe"]
     fn connected_work_console_bulk_and_baud() {
         let serial = std::env::var("PDBG_PROBE_SERIAL").expect("PDBG_PROBE_SERIAL");
-        let mut io = PdbgLink::open_serial(serial).unwrap();
+        let mut io = PhBoardLink::open_serial(serial).unwrap();
         io.uart_config(0, 115200, 8, 1, 0).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let mut work = Link::new(tx, 115200, false);
@@ -1176,7 +1176,7 @@ mod tests {
         assert!(work.baud.abs_diff(921600) < 20000);
         work.send(&mut io, b"new-baud", |_, _| {}).unwrap();
         work.set_baud(&mut io, 115200).unwrap();
-        struct FailConfig(PdbgLink);
+        struct FailConfig(PhBoardLink);
         impl Io for FailConfig {
             fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
                 if baud > 200000 {
@@ -1282,7 +1282,7 @@ mod tests {
         )
         .unwrap();
         struct DropCommit {
-            io: PdbgLink,
+            io: PhBoardLink,
             decoder: Decoder,
             drop_once: bool,
         }

@@ -806,15 +806,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "device_control"
-version = "0.1.0"
-dependencies = [
- "ph-bridge",
- "rusb",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2473,6 +2464,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ph-app"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui_kittest",
+ "image",
+ "ph_app_link",
+ "rfd",
+ "serde",
+ "serde_json",
+ "winit",
+]
+
+[[package]]
 name = "ph-bridge"
 version = "0.1.0"
 dependencies = [
@@ -2485,17 +2490,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "picoharness-desktop"
+name = "ph_app_link"
 version = "0.1.0"
 dependencies = [
- "device_control",
- "eframe",
- "egui_kittest",
- "image",
- "rfd",
- "serde",
- "serde_json",
- "winit",
+ "ph-bridge",
+ "rusb",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

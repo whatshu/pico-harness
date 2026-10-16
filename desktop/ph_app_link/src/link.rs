@@ -1,4 +1,4 @@
-//! `PdbgLink` — the Debug-core control link, now carried by the PH protocol.
+//! `PhBoardLink` — the Debug-core control link, now carried by the PH protocol.
 //!
 //! The board used to expose a private PDBG vendor interface; the firmware
 //! replaced it with the PH protocol on the CDC `PH Terminal` (see
@@ -32,13 +32,13 @@ fn moved(channel: &str) -> Error {
     ))
 }
 
-pub struct PdbgLink {
+pub struct PhBoardLink {
     client: PhClient<SerialTransport>,
     pub serial: Option<String>,
     tty: String,
 }
 
-impl PdbgLink {
+impl PhBoardLink {
     fn connect(serial: Option<String>) -> Result<Self> {
         let devices = ph_bridge::device::scan();
         let chosen = devices

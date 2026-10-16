@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::work_link;
-use device_control::{CmsisDap, Measurement, PdbgLink, PowerStatus};
+use ph_app_link::{CmsisDap, Measurement, PhBoardLink, PowerStatus};
 
 const DHCSR: u32 = 0xe000_edf0;
 const DCRSR: u32 = 0xe000_edf4;
@@ -186,7 +186,7 @@ fn run(
     events: &Sender<Event>,
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let mut link = PdbgLink::open_serial(serial).map_err(|e| e.to_string())?;
+    let mut link = PhBoardLink::open_serial(serial).map_err(|e| e.to_string())?;
     let info = link.info().map_err(|e| e.to_string())?;
     let actual_baud = link
         .uart_config(0, baud, 8, 1, 0)
@@ -250,7 +250,7 @@ fn run(
                 .map_err(|e| e.to_string())
                 .and_then(|completed| {
                     if let Some(status) = completed {
-                        let device_control::protocol::CaptureStatus {
+                        let ph_app_link::protocol::CaptureStatus {
                             sample_hz: rate,
                             count,
                             elapsed_us,
@@ -304,7 +304,7 @@ fn run(
                     let _ = events.send(Event::Measurement {
                         value,
                         captured_at: Instant::now(),
-                        timestamp_unix_ms: picoharness_desktop::telemetry::unix_ms(),
+                        timestamp_unix_ms: ph_app::telemetry::unix_ms(),
                     });
                 }
                 Err(error) => {
@@ -365,7 +365,7 @@ fn run(
     }
 }
 
-fn stop_capture(link: &mut PdbgLink, capture: &mut Option<(u32, u32, Instant)>) {
+fn stop_capture(link: &mut PhBoardLink, capture: &mut Option<(u32, u32, Instant)>) {
     if capture.take().is_some() {
         let _ = link.cancel_capture();
     }
@@ -373,7 +373,7 @@ fn stop_capture(link: &mut PdbgLink, capture: &mut Option<(u32, u32, Instant)>) 
 
 fn execute(
     command: Command,
-    link: &mut PdbgLink,
+    link: &mut PhBoardLink,
     work: &mut work_link::Link,
     dap: &mut Option<CmsisDap>,
     events: &Sender<Event>,
@@ -468,7 +468,7 @@ fn execute(
             length,
             target,
         } => {
-            let length = picoharness_desktop::memory_export::read_length(&target, address, length);
+            let length = ph_app::memory_export::read_length(&target, address, length);
             let selected = dap.as_mut().ok_or("Connect SWD first")?;
             let bytes = read_memory_bytes(selected, address, length, work)?;
             let _ = events.send(Event::SwdMemory { address, bytes });
@@ -477,7 +477,7 @@ fn execute(
             )));
         }
         Command::MemoryExport { address, length } => {
-            picoharness_desktop::memory_export::validate_range(address, length)?;
+            ph_app::memory_export::validate_range(address, length)?;
             let selected = dap.as_mut().ok_or("Connect SWD first")?;
             if read_word(selected, DHCSR)? & (1 << 17) == 0 {
                 return Err("Halt the Work Core before exporting memory".into());
@@ -559,7 +559,7 @@ fn read_memory_bytes(
     length: usize,
     work: &work_link::Link,
 ) -> Result<Vec<u8>, String> {
-    picoharness_desktop::memory_export::validate_range(address, length)?;
+    ph_app::memory_export::validate_range(address, length)?;
     let prefix = (address & 3) as usize;
     let aligned = address & !3;
     let words = (prefix + length).div_ceil(4);
@@ -688,11 +688,11 @@ mod tests {
     #[test]
     #[ignore = "Requires an explicitly selected probe and silent Work firmware; samples UART/SPI, timeout and cancellation without flashing"]
     fn connected_pretrigger_spi_and_recovery() {
-        use device_control::PdbgLink;
+        use ph_app_link::PhBoardLink;
         use std::time::{Duration, Instant};
 
         let serial = std::env::var("PDBG_PROBE_SERIAL").expect("PDBG_PROBE_SERIAL");
-        let mut link = PdbgLink::open_serial(serial).unwrap();
+        let mut link = PhBoardLink::open_serial(serial).unwrap();
         assert!(link.info().unwrap().contains("capture-pretrigger"));
         link.uart_config(0, 115200, 8, 1, 0).unwrap();
         // At 100 kHz the ring wraps while waiting, including during timeout.
@@ -1169,7 +1169,7 @@ mod tests {
                     assert_eq!(address, 0x10000001);
                     assert_eq!(bytes.len(), 257);
                     assert!(registers);
-                    use picoharness_desktop::memory_export::Format;
+                    use ph_app::memory_export::Format;
                     for format in [Format::Binary, Format::IntelHex, Format::Csv] {
                         std::fs::write(
                             format!("/tmp/picoharness-memory.{}", format.extension()),

@@ -1,5 +1,5 @@
 [package]
-name = "device_control"
+name = "ph_app_link"
 version = "0.1.0"
 edition = "2021"
 publish = false

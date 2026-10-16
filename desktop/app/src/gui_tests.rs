@@ -281,14 +281,14 @@ fn console_baud_apply_and_protocol_confirmation_use_the_selected_preset() {
 fn overview_pause_freezes_only_the_view_and_resume_shows_latest_measurement() {
     let mut gui = Gui::new(Page::Overview, [1360., 940.], 0);
     let sample = |power_mw| live::Event::Measurement {
-        value: device_control::protocol::Measurement {
+        value: ph_app_link::protocol::Measurement {
             shunt_uv: 50.,
             bus_mv: 5000.,
             current_ma: power_mw / 5.,
             power_mw,
         },
         captured_at: Instant::now(),
-        timestamp_unix_ms: picoharness_desktop::telemetry::unix_ms(),
+        timestamp_unix_ms: ph_app::telemetry::unix_ms(),
     };
     gui.events.send(sample(100.)).unwrap();
     gui.settle();
@@ -307,7 +307,7 @@ fn overview_pause_freezes_only_the_view_and_resume_shows_latest_measurement() {
 
 #[test]
 fn overview_wheel_and_drag_navigate_charts_and_fit_restores_live() {
-    use picoharness_desktop::telemetry::Sample;
+    use ph_app::telemetry::Sample;
     let mut gui = Gui::new(Page::Overview, [960., 700.], 0);
     for i in 0..120 {
         gui.app.state_mut().devices[0].monitor.push(Sample {

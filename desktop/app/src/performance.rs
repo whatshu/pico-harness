@@ -1,7 +1,7 @@
 //! Opt-in native-window fixtures. Compiled only with `--features ui-perf`.
 use crate::{live, logic::Decoder, model::Device, App, Page};
 use eframe::{egui, glow::HasContext};
-use picoharness_desktop::telemetry::{self, History, Sample};
+use ph_app::telemetry::{self, History, Sample};
 use serde_json::{json, Value};
 use std::{
     fs::{self, File},
@@ -285,7 +285,7 @@ impl Runtime {
                 self.next_measurement += 1;
                 let sample = sample(360. + self.next_measurement as f64 / 20.);
                 let _ = events.send(live::Event::Measurement {
-                    value: device_control::Measurement {
+                    value: ph_app_link::Measurement {
                         shunt_uv: 0.,
                         bus_mv: sample.bus_voltage_v * 1000.,
                         current_ma: sample.current_ma,

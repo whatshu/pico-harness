@@ -1,12 +1,12 @@
-//! Hardware-gated checks: run with `cargo test -p device_control -- --ignored`.
+//! Hardware-gated checks: run with `cargo test -p ph_app_link -- --ignored`.
 //! Requires a connected PicoHarness probe in application mode.
 
-use device_control::PdbgLink;
+use ph_app_link::PhBoardLink;
 
 #[test]
 #[ignore = "requires connected hardware"]
 fn link_reports_identity_and_power_over_ph() {
-    let mut link = PdbgLink::open().expect("open PH control link");
+    let mut link = PhBoardLink::open().expect("open PH control link");
     let info = link.info().expect("GetInfo");
     assert!(info.starts_with("PicoHarness/"), "identity: {info}");
 
@@ -24,7 +24,7 @@ fn link_reports_identity_and_power_over_ph() {
 #[test]
 #[ignore = "requires connected hardware"]
 fn moved_channels_are_rejected_clearly() {
-    let mut link = PdbgLink::open().expect("open PH control link");
+    let mut link = PhBoardLink::open().expect("open PH control link");
     let err = link.spi_transfer(&[0u8; 8]).unwrap_err();
     assert!(err.to_string().contains("Bulk"), "unexpected error: {err}");
 }

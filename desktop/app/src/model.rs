@@ -364,7 +364,7 @@ pub fn push<T>(queue: &mut VecDeque<T>, v: T, max: usize) {
     }
 }
 pub struct FirmwareView {
-    pub job: Option<picoharness_desktop::firmware::Job>,
+    pub job: Option<ph_app::firmware::Job>,
     pub status: String,
     pub error: String,
     pub logs: VecDeque<String>,
@@ -399,7 +399,7 @@ pub struct Device {
     pub current: f64,
     pub watts: f64,
     pub tick_at: f64,
-    pub monitor: picoharness_desktop::telemetry::Monitor,
+    pub monitor: ph_app::telemetry::Monitor,
     pub logs: VecDeque<Log>,
     pub events: VecDeque<Log>,
     pub audit: Vec<Log>,
@@ -428,7 +428,7 @@ pub struct Device {
     pub task: Option<Task>,
     pub firmware: String,
     pub flash: FirmwareView,
-    pub debug_update_job: Option<picoharness_desktop::debug_update::Job>,
+    pub debug_update_job: Option<ph_app::debug_update::Job>,
     pub debug_image: String,
     pub picotool: String,
     pub debug_update_status: String,
@@ -448,10 +448,10 @@ pub struct Device {
     pub mem_edit: String,
     pub mem_offset: usize,
     pub mem_export_length: usize,
-    pub mem_export_format: picoharness_desktop::memory_export::Format,
+    pub mem_export_format: ph_app::memory_export::Format,
     pub mem_export_pending: Option<(
         std::path::PathBuf,
-        picoharness_desktop::memory_export::Format,
+        ph_app::memory_export::Format,
     )>,
     pub logic: Logic,
     pub debugger: DebugView,
@@ -545,7 +545,7 @@ impl Device {
         }
     }
     pub fn start_firmware(&mut self, now: f64) -> Result<(), String> {
-        use picoharness_desktop::firmware::{Config, Job, Target};
+        use ph_app::firmware::{Config, Job, Target};
         let start = || -> Result<Config, String> {
             if self.flash.job.is_some()
                 || self.debug_update_job.is_some()
@@ -602,7 +602,7 @@ impl Device {
         }
     }
     fn poll_firmware(&mut self, now: f64) {
-        use picoharness_desktop::firmware::Event;
+        use ph_app::firmware::Event;
         let events: Vec<_> = self
             .flash
             .job
@@ -869,7 +869,7 @@ impl Device {
             .map(|job| job.rx.try_iter().collect())
             .unwrap_or_default();
         for update in updates {
-            use picoharness_desktop::debug_update::Event;
+            use ph_app::debug_update::Event;
             match update {
                 Event::Phase(text) => self.debug_update_status = text,
                 Event::Done(result) => {
@@ -943,7 +943,7 @@ impl Device {
                     self.current = value.current_ma;
                     self.watts = value.power_mw;
                     self.tick_at = (now - captured_at.elapsed().as_secs_f64()).max(0.);
-                    self.monitor.push(picoharness_desktop::telemetry::Sample {
+                    self.monitor.push(ph_app::telemetry::Sample {
                         timestamp_unix_ms,
                         elapsed_s: self.tick_at,
                         bus_voltage_v: value.bus_mv / 1000.,

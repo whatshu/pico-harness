@@ -1,6 +1,6 @@
 //! Debug Core updates through its ROM bootloader, pinned to the physical USB port.
 use crate::firmware::{Image, Target};
-use device_control::{usb, PdbgLink};
+use ph_app_link::{usb, PhBoardLink};
 use std::{
     path::PathBuf,
     process::Command,
@@ -40,7 +40,7 @@ fn update(
     {
         return Err("Select a Debug Core UF2 image".into());
     }
-    let mut link = PdbgLink::open_serial(serial).map_err(|e| e.to_string())?;
+    let mut link = PhBoardLink::open_serial(serial).map_err(|e| e.to_string())?;
     let info = link.info().map_err(|e| e.to_string())?;
     let powered = link.status().map_err(|e| e.to_string())?.power_on;
     let (target, pid, family) = match info
@@ -51,7 +51,12 @@ fn update(
         Some("pico2") => (Target::Rp2350, 0x000f, "0xe48bff59"),
         _ => return Err("Debug Core did not report its chip family".into()),
     };
-    if !info.split(';').any(|field| field == "debug-bootsel") {
+    // New PH firmware advertises `ph-terminal` (DebugBootsel lives in the PH
+    // protocol); accept the legacy PDBG `debug-bootsel` tag too.
+    if !info
+        .split(';')
+        .any(|field| field == "ph-terminal" || field == "debug-bootsel")
+    {
         return Err("This Debug Core firmware does not support software updates".into());
     }
     // Check all blocks, the image family, the programmer, and USB identity before rebooting.
@@ -59,8 +64,8 @@ fn update(
     if !image.segments.iter().any(|segment| {
         segment
             .bytes
-            .windows(b"pdbg-link;dedicated-core1".len())
-            .any(|bytes| bytes == b"pdbg-link;dedicated-core1")
+            .windows(b"ph-terminal".len())
+            .any(|bytes| bytes == b"ph-terminal")
     }) {
         return Err(
             "The selected UF2 does not identify itself as a PicoHarness Debug Core image".into(),
@@ -104,7 +109,7 @@ fn update(
     ]))?;
     let started = Instant::now();
     loop {
-        if let Ok(mut updated) = PdbgLink::open_serial(serial) {
+        if let Ok(mut updated) = PhBoardLink::open_serial(serial) {
             if let Ok(info) = updated.info() {
                 updated.set_power(powered).map_err(|e| e.to_string())?;
                 return Ok(info);

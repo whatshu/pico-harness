@@ -358,7 +358,7 @@ mod tests {
     use super::*;
     #[test]
     fn pause_freezes_view_but_keeps_recording_and_resumes_at_latest() {
-        let dir = std::env::temp_dir().join(format!("pdbg-pause-{}", unix_ms()));
+        let dir = std::env::temp_dir().join(format!("ph-app-pause-{}", unix_ms()));
         let mut monitor = Monitor::default();
         monitor.start("test", &dir).unwrap();
         monitor.push(sample(1.));
@@ -387,7 +387,7 @@ mod tests {
     }
     #[test]
     fn recording_flushes_every_sample_and_round_trips_into_csv() {
-        let dir = std::env::temp_dir().join(format!("pdbg-history-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ph-app-history-{}", std::process::id()));
         let mut m = Monitor::default();
         m.start("test-serial", &dir).unwrap();
         m.push(sample(10.));

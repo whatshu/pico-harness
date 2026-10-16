@@ -371,7 +371,7 @@ struct ImageFile(PathBuf);
 impl ImageFile {
     fn new(image: &Image) -> Result<Self, String> {
         let path = std::env::temp_dir().join(format!(
-            "pdbg-program-{}-{}.hex",
+            "ph-fw-program-{}-{}.hex",
             std::process::id(),
             TEMP_NUMBER.fetch_add(1, Ordering::Relaxed)
         ));
@@ -393,7 +393,7 @@ impl Drop for ImageFile {
     }
 }
 struct Power {
-    link: device_control::PdbgLink,
+    link: ph_app_link::PhBoardLink,
     restore_off: bool,
 }
 impl Drop for Power {
@@ -433,7 +433,7 @@ fn program(config: &Config, events: &Sender<Event>, cancel: &AtomicBool) -> Resu
     }
     let _ = events.send(Event::Phase("Preparing"));
     let mut link =
-        device_control::PdbgLink::open_serial(&config.serial).map_err(|e| e.to_string())?;
+        ph_app_link::PhBoardLink::open_serial(&config.serial).map_err(|e| e.to_string())?;
     let was_on = link.status().map_err(|e| e.to_string())?.power_on;
     let mut power = Power {
         link,
@@ -697,7 +697,7 @@ mod tests {
     #[test]
     fn process_failure_and_cancel_never_report_success() {
         use std::os::unix::fs::PermissionsExt;
-        let path = std::env::temp_dir().join(format!("pdbg-openocd-test-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("ph-fw-openocd-test-{}", std::process::id()));
         fs::write(
             &path,
             "#!/bin/sh\necho PDBG_FLASH_WRITING\necho PDBG_FLASH_COMPLETE\nexit 1\n",

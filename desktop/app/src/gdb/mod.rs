@@ -609,7 +609,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     #[test]
     fn split_records_async_generations_resource_lease_and_process_exit() {
-        let dir = std::env::temp_dir().join(format!("pdbg-mi-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ph-app-mi-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let elf = dir.join("fixture with spaces.elf");
         std::fs::write(&elf, b"\x7fELF").unwrap();

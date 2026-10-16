@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use picoharness_desktop::gdb;
+use ph_app::gdb;
 mod command_history;
 mod gdb_ui;
 #[cfg(test)]
@@ -48,7 +48,7 @@ struct App {
     history_viewer: Device,
     show_history: bool,
     notice: String,
-    scan: Option<mpsc::Receiver<Result<Vec<device_control::DeviceInfo>, String>>>,
+    scan: Option<mpsc::Receiver<Result<Vec<ph_app_link::DeviceInfo>, String>>>,
     screenshot: Option<String>,
     screenshot_requested: bool,
     quit_at: Option<f64>,
@@ -204,7 +204,7 @@ impl App {
         self.scan = Some(rx);
         self.next_scan = self.start.elapsed().as_secs_f64() + 2.;
         std::thread::spawn(move || {
-            let _ = tx.send(device_control::enumerate_devices().map_err(|e| e.to_string()));
+            let _ = tx.send(ph_app_link::enumerate_devices().map_err(|e| e.to_string()));
         });
     }
     fn discovery_enabled(&self) -> bool {
@@ -214,7 +214,7 @@ impl App {
         }
         true
     }
-    fn apply_discovery(&mut self, found: Vec<device_control::DeviceInfo>) {
+    fn apply_discovery(&mut self, found: Vec<ph_app_link::DeviceInfo>) {
         #[cfg(feature = "ui-perf")]
         let found = found
             .into_iter()
@@ -747,7 +747,7 @@ impl eframe::App for App {
                             d.stop_live(now);
                             d.debug_update_status = self.locale.tr("Validating").into();
                             d.debug_update_job =
-                                Some(picoharness_desktop::debug_update::Job::start(
+                                Some(ph_app::debug_update::Job::start(
                                     d.debugger.config.serial.clone(),
                                     d.debug_image.clone().into(),
                                     d.picotool.clone(),
@@ -761,7 +761,7 @@ impl eframe::App for App {
                     ui.label(self.locale.tr("Recordings are saved automatically"));
                     ui.label(
                         RichText::new(
-                            picoharness_desktop::telemetry::recording_dir()
+                            ph_app::telemetry::recording_dir()
                                 .display()
                                 .to_string(),
                         )
@@ -835,8 +835,8 @@ mod tests {
         let app = App::new(&eframe::CreationContext::_new_kittest(ctx.clone()));
         (ctx, app)
     }
-    fn info(serial: &str) -> device_control::DeviceInfo {
-        device_control::DeviceInfo {
+    fn info(serial: &str) -> ph_app_link::DeviceInfo {
+        ph_app_link::DeviceInfo {
             serial: Some(serial.into()),
             bus: 1,
             address: 2,
@@ -957,9 +957,9 @@ mod tests {
     #[test]
     #[ignore = "Requires connected PDBG USB probe; records real measurements in /tmp"]
     fn connected_probe_records_and_exports_real_measurements() {
-        use picoharness_desktop::telemetry::History;
+        use ph_app::telemetry::History;
         let serial = std::env::var("PDBG_PROBE_SERIAL").expect("Set PDBG_PROBE_SERIAL");
-        let mut link = device_control::PdbgLink::open_serial(&serial).unwrap();
+        let mut link = ph_app_link::PhBoardLink::open_serial(&serial).unwrap();
         let before = link.status().unwrap();
         println!("Probe {serial}: {}", link.info().unwrap());
         println!("Initial status: {before:?}");
@@ -967,7 +967,7 @@ mod tests {
         struct RestorePower(String, bool);
         impl Drop for RestorePower {
             fn drop(&mut self) {
-                if let Ok(mut link) = device_control::PdbgLink::open_serial(&self.0) {
+                if let Ok(mut link) = ph_app_link::PhBoardLink::open_serial(&self.0) {
                     if link.status().is_ok_and(|s| s.power_on != self.1) {
                         let _ = link.set_power(self.1);
                     }
@@ -976,7 +976,7 @@ mod tests {
         }
         let restore = RestorePower(serial.clone(), before.power_on);
         let (ctx, mut app) = app();
-        let found = device_control::enumerate_devices().unwrap();
+        let found = ph_app_link::enumerate_devices().unwrap();
         assert!(found.iter().any(|d| d.serial.as_deref() == Some(&serial)));
         app.apply_discovery(found);
         app.selected = app.devices.iter().position(|d| d.id == serial).unwrap();
@@ -987,7 +987,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(25));
         }
         assert!(!app.sidebar_open);
-        let dir = std::env::temp_dir().join("pdbg-desktop-hardware-check");
+        let dir = std::env::temp_dir().join("ph-app-hardware-check");
         app.devices[app.selected]
             .monitor
             .start(&serial, &dir)
@@ -1046,7 +1046,7 @@ mod tests {
         println!("History: {}\nCSV: {}", path.display(), csv.display());
         drop(app);
         drop(restore);
-        let mut link = device_control::PdbgLink::open_serial(serial).unwrap();
+        let mut link = ph_app_link::PhBoardLink::open_serial(serial).unwrap();
         assert_eq!(link.status().unwrap().power_on, before.power_on);
     }
 }

@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use device_control::{CmsisDap, DeviceSelector, PdbgLink, Result};
+use ph_app_link::{CmsisDap, DeviceSelector, PhBoardLink, Result};
 
 fn main() -> Result<()> {
-    let mut link = PdbgLink::open()?;
+    let mut link = PhBoardLink::open()?;
     println!("PDBG serial: {:?}", link.serial);
     println!("PDBG info: {}", link.info()?);
     println!("PDBG status: {:?}", link.status()?);
