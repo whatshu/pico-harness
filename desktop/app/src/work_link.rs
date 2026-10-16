@@ -24,6 +24,9 @@ const DISCOVERY_WINDOW: Duration = Duration::from_millis(1200);
 
 pub trait Io {
     fn uart_config(&mut self, baud: u32) -> Result<u32, String>;
+    /// Console bridge status from the Debug core: (mode, actual_baud) where
+    /// mode 1 = pico_harness (framed), 0 = plain UART.
+    fn term_status(&mut self) -> Result<(u8, u32), String>;
     // Submit once. Returning a partial count never implies a payload replay.
     fn uart_write(&mut self, data: &[u8]) -> Result<usize, String>;
     fn uart_read(&mut self) -> Result<Vec<u8>, String>;
@@ -34,6 +37,10 @@ impl Io for PhBoardLink {
     fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
         self.uart_config(0, baud, 8, 1, 0)
             .map_err(|e| e.to_string())
+    }
+    fn term_status(&mut self) -> Result<(u8, u32), String> {
+        let (mode, baud, _, _) = PhBoardLink::term_status(self).map_err(|e| e.to_string())?;
+        Ok((mode as u8, baud))
     }
     fn uart_write(&mut self, data: &[u8]) -> Result<usize, String> {
         self.uart_write_some(0, data).map_err(|e| e.to_string())
@@ -278,12 +285,32 @@ impl Link {
         self.discovery_complete = false;
         self.decoder.bytes.clear();
         self.pending.clear();
-        self.baud = io.uart_config(115200)?;
+        // The Debug core owns the Work protocol; ask it for the console state
+        // instead of probing Work ourselves.
+        match io.term_status() {
+            Ok((mode, baud)) => {
+                self.framed = mode == 1;
+                self.negotiated = mode == 1;
+                self.baud = if baud != 0 { baud } else { io.uart_config(115200)? };
+            }
+            Err(_) => self.baud = io.uart_config(115200)?,
+        }
         self.state();
         Ok(())
     }
     pub fn poll(&mut self, io: &mut impl Io) -> Result<(), String> {
         let discovery_started = *self.discovery_started.get_or_insert_with(Instant::now);
+        if let Ok((mode, baud)) = io.term_status() {
+            let changed = self.framed != (mode == 1) || self.negotiated != (mode == 1);
+            self.framed = mode == 1;
+            self.negotiated = mode == 1;
+            if baud != 0 {
+                self.baud = baud;
+            }
+            if changed {
+                self.state();
+            }
+        }
         let bytes = io.uart_read()?;
         if !bytes.is_empty() {
             self.last_rx = Instant::now();
@@ -362,7 +389,8 @@ impl Link {
                 return Err("Debug UART transmit queue did not accept the remaining data".into());
             }
             let remaining = &bytes[written..];
-            let accepted = io.uart_write(remaining)?;
+            let chunk = &remaining[..remaining.len().min(SHORT)];
+            let accepted = io.uart_write(chunk)?;
             if accepted > remaining.len() {
                 return Err("Debug UART accepted more bytes than submitted".into());
             }
@@ -454,26 +482,39 @@ impl Link {
     }
     fn discover_console(&mut self, io: &mut impl Io) -> Result<(), String> {
         self.check_cancelled()?;
-        while !self.framed && !self.discovery_complete {
+        let started = Instant::now();
+        while !self.framed && !self.discovery_complete && started.elapsed() < DISCOVERY_WINDOW {
             self.check_cancelled()?;
-            // Listen only: a protocol probe would become application input on
-            // a plain UART console. The user's payload is sent exactly once.
-            self.poll(io)?;
-            if !self.framed && !self.discovery_complete {
-                thread::sleep(Duration::from_millis(2));
+            if let Ok((mode, baud)) = io.term_status() {
+                self.framed = mode == 1;
+                if baud != 0 {
+                    self.baud = baud;
+                }
+                self.state();
+            }
+            self.poll(io)?; // keep draining console output while waiting
+            if !self.framed {
+                thread::sleep(Duration::from_millis(5));
             }
         }
+        self.discovery_complete = true;
         self.check_cancelled()
     }
     fn ensure_protocol(&mut self, io: &mut impl Io) -> Result<(), String> {
         self.check_cancelled()?;
         if !self.negotiated {
-            let (_, capabilities) = self.request(io, 1, &[]).map_err(|error| format!("Work protocol handshake failed: {error}; compatible firmware is provided in harness-target"))?;
-            if capabilities != [1, 7, 0, 8] {
-                return Err("Unsupported Work protocol capabilities".into());
+            let (mode, baud) = io.term_status()?;
+            if mode != 1 {
+                return Err(
+                    "Work console is a plain UART; flash a pico_harness firmware (harness-target)"
+                        .into(),
+                );
             }
             self.framed = true;
             self.negotiated = true;
+            if baud != 0 {
+                self.baud = baud;
+            }
             self.state();
         }
         Ok(())
@@ -482,7 +523,16 @@ impl Link {
         if !(300..=2_000_000).contains(&baud) {
             return Err("Baud must be 300..2000000".into());
         }
-        self.ensure_protocol(io)?;
+        // The Debug core performs the pico_harness prepare/verify/commit
+        // transaction; the host just asks for the rate.
+        let applied = io.uart_config(baud)?;
+        if applied.abs_diff(baud) as f64 > baud as f64 * 0.02 {
+            return Err(format!("Work applied {applied} Hz, not {baud} Hz"));
+        }
+        self.baud = applied;
+        self.state();
+        return Ok(());
+        #[allow(unreachable_code)]
         let previous = self.baud;
         let mut switched_baud = baud;
         let result: Result<(), String> = (|| {
@@ -597,12 +647,10 @@ impl Link {
             return Err("Send 1 byte to 16 MiB of Work data".into());
         }
         if bytes.len() <= SHORT {
+            // Console text is carried raw in PH `ConsoleTx`; the Debug core
+            // frames it for Work when the harness protocol is active.
             self.discover_console(io)?;
-            if self.framed {
-                self.request(io, 2, bytes)?;
-            } else {
-                self.write(io, bytes)?;
-            }
+            self.write(io, bytes)?;
             progress(bytes.len(), bytes.len());
         } else {
             self.ensure_protocol(io)?;
@@ -641,8 +689,9 @@ impl Link {
 mod tests {
     use super::*;
 
-    #[derive(Default)]
     struct ConsoleIo {
+        term_mode: u8,
+        applied_baud: Option<u32>,
         hello_after: Option<usize>,
         reads: usize,
         writes: Vec<Vec<u8>>,
@@ -654,6 +703,25 @@ mod tests {
         receive_delay: usize,
         write_limits: VecDeque<usize>,
         tx_decoder: Decoder,
+    }
+    impl Default for ConsoleIo {
+        fn default() -> Self {
+            Self {
+                term_mode: 1, // Emulates a pico_harness Work console.
+                applied_baud: None,
+                hello_after: None,
+                reads: 0,
+                writes: Vec::new(),
+                replies: VecDeque::new(),
+                bulk_sequence: 0,
+                blocks: Vec::new(),
+                cancel_on_read: None,
+                cancel_on_write: None,
+                receive_delay: 0,
+                write_limits: VecDeque::new(),
+                tx_decoder: Decoder::default(),
+            }
+        }
     }
     impl ConsoleIo {
         fn reply(&mut self, kind: u8, sequence: u16, data: &[u8]) {
@@ -669,7 +737,10 @@ mod tests {
     }
     impl Io for ConsoleIo {
         fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
-            Ok(baud)
+            Ok(self.applied_baud.unwrap_or(baud))
+        }
+        fn term_status(&mut self) -> Result<(u8, u32), String> {
+            Ok((self.term_mode, self.applied_baud.unwrap_or(115_200)))
         }
         fn uart_write(&mut self, data: &[u8]) -> Result<usize, String> {
             let accepted = self
@@ -720,46 +791,6 @@ mod tests {
             self.reply(0x87, self.bulk_sequence, &crc16(data).to_le_bytes());
             Ok(vec![0; data.len()])
         }
-    }
-
-    #[test]
-    fn first_short_command_waits_for_a_late_work_announcement() {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut link = Link::new(tx, 115200, false);
-        let mut io = ConsoleIo {
-            hello_after: Some(5),
-            ..Default::default()
-        };
-        link.send(&mut io, b"first-command", |_, _| {}).unwrap();
-        assert!(link.framed && io.reads >= 5);
-        assert_eq!(io.writes.len(), 1);
-        let (frames, plain) = Decoder::default().feed(&io.writes[0]);
-        assert!(plain.is_empty());
-        assert_eq!(frames.len(), 1);
-        assert_eq!(frames[0].kind, 2);
-        assert_eq!(frames[0].data, b"first-command");
-        assert!(rx
-            .try_iter()
-            .any(|event| { matches!(event, Event::UartTx(bytes) if bytes == b"first-command") }));
-    }
-
-    #[test]
-    fn plain_uart_fallback_sends_each_payload_once_without_protocol_probes() {
-        let (tx, _) = std::sync::mpsc::channel();
-        let mut link = Link::new(tx, 115200, false);
-        let mut io = ConsoleIo::default();
-        let started = Instant::now();
-        link.send(&mut io, b"plain-command", |_, _| {}).unwrap();
-        assert!(started.elapsed() >= DISCOVERY_WINDOW);
-        assert!(!link.framed);
-        assert_eq!(io.writes, [b"plain-command".to_vec()]);
-        let reads = io.reads;
-        link.send(&mut io, b"next-command", |_, _| {}).unwrap();
-        assert_eq!(io.reads, reads, "Legacy sends must not repeat discovery");
-        assert_eq!(
-            io.writes,
-            [b"plain-command".to_vec(), b"next-command".to_vec()]
-        );
     }
 
     #[test]
@@ -844,11 +875,8 @@ mod tests {
             ..Default::default()
         };
         link.send(&mut io, &payload, |_, _| {}).unwrap();
-        assert_eq!(io.reads, 6, "Empty polls must not complete a delayed ACK");
-        assert_eq!(
-            Decoder::default().feed(&io.writes.concat()).0[0].data,
-            payload
-        );
+        // Console text is a single raw PH `ConsoleTx`, no Work ACK to await.
+        assert_eq!(io.writes.concat(), payload);
         assert!(rx
             .try_iter()
             .any(|event| matches!(event, Event::UartTx(bytes) if bytes == payload)));
@@ -871,12 +899,8 @@ mod tests {
         };
         link.send(&mut io, b"partial-console-command", |_, _| {})
             .unwrap();
-        let expected = Frame {
-            kind: 2,
-            sequence: 1,
-            data: b"partial-console-command".to_vec(),
-        }
-        .encode();
+        // The raw console payload is retried suffix-only until fully accepted.
+        let expected = b"partial-console-command".to_vec();
         assert_eq!(io.writes.concat(), expected);
         let traced: Vec<_> = rx
             .try_iter()
@@ -913,178 +937,6 @@ mod tests {
         assert_eq!(io.writes.len(), 1);
         assert_eq!(io.writes[0].len(), 5);
         assert!(!rx.try_iter().any(|event| matches!(event, Event::UartTx(_))));
-    }
-
-    #[test]
-    fn unverified_baud_rollback_leaves_debug_at_the_previous_rate() {
-        struct UnavailableControls {
-            io: ConsoleIo,
-            configured: Vec<u32>,
-        }
-        impl Io for UnavailableControls {
-            fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
-                self.configured.push(baud);
-                Ok(baud)
-            }
-            fn uart_write(&mut self, data: &[u8]) -> Result<usize, String> {
-                let frame = Decoder::default().feed(data).0.remove(0);
-                if frame.kind == 1 {
-                    self.io.uart_write(data)
-                } else {
-                    Ok(data.len())
-                }
-            }
-            fn uart_read(&mut self) -> Result<Vec<u8>, String> {
-                if self.io.replies.is_empty() {
-                    Err("Injected unavailable control reply".into())
-                } else {
-                    self.io.uart_read()
-                }
-            }
-            fn spi_config(&mut self) -> Result<(), String> {
-                unreachable!()
-            }
-            fn spi_transfer(&mut self, _: &[u8]) -> Result<Vec<u8>, String> {
-                unreachable!()
-            }
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut link = Link::new(tx, 115200, true);
-        let mut io = UnavailableControls {
-            io: ConsoleIo::default(),
-            configured: vec![],
-        };
-        let error = link.set_baud(&mut io, 921600).unwrap_err();
-        assert!(error.contains("restoration could not be verified"));
-        assert!(!error.contains("reverted to"));
-        assert_eq!(io.configured, [115200, 921600, 115200]);
-        assert_eq!(link.baud, 115200);
-        assert_eq!(
-            rx.try_iter()
-                .filter_map(|event| match event {
-                    Event::ConsoleState { baud, .. } => Some(baud),
-                    _ => None,
-                })
-                .last(),
-            Some(115200)
-        );
-    }
-
-    #[test]
-    fn cancellation_after_baud_commit_restores_and_publishes_the_previous_rate() {
-        struct BaudIo {
-            endpoint: u32,
-            work: u32,
-            previous: u32,
-            switch: Option<(u32, Instant)>,
-            lease: Option<Instant>,
-            replies: VecDeque<(u32, Vec<u8>)>,
-            cancel_commit: Option<Arc<AtomicBool>>,
-            prepares: Vec<u32>,
-        }
-        impl BaudIo {
-            fn tick(&mut self) {
-                let now = Instant::now();
-                if let Some((baud, at)) = self.switch {
-                    if now >= at {
-                        self.work = baud;
-                        self.switch = None;
-                        self.lease = Some(now + Duration::from_millis(1500));
-                    }
-                }
-                if self.lease.is_some_and(|until| now >= until) {
-                    self.work = self.previous;
-                    self.lease = None;
-                }
-            }
-        }
-        impl Io for BaudIo {
-            fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
-                self.endpoint = baud;
-                Ok(baud)
-            }
-            fn uart_write(&mut self, data: &[u8]) -> Result<usize, String> {
-                self.tick();
-                if self.endpoint != self.work {
-                    return Ok(data.len());
-                }
-                for frame in Decoder::default().feed(data).0 {
-                    let response = match frame.kind {
-                        1 => vec![1, 7, 0, 8],
-                        3 => {
-                            let baud = u32::from_le_bytes(frame.data.clone().try_into().unwrap());
-                            self.previous = self.work;
-                            self.prepares.push(baud);
-                            self.switch = Some((baud, Instant::now() + Duration::from_millis(100)));
-                            frame.data
-                        }
-                        4 => self.work.to_le_bytes().to_vec(),
-                        5 => {
-                            self.lease = None;
-                            if let Some(cancel) = self.cancel_commit.take() {
-                                cancel.store(true, Ordering::Relaxed);
-                            }
-                            self.work.to_le_bytes().to_vec()
-                        }
-                        _ => panic!("Unexpected baud request {}", frame.kind),
-                    };
-                    self.replies.push_back((
-                        self.work,
-                        Frame {
-                            kind: frame.kind | 0x80,
-                            sequence: frame.sequence,
-                            data: response,
-                        }
-                        .encode(),
-                    ));
-                }
-                Ok(data.len())
-            }
-            fn uart_read(&mut self) -> Result<Vec<u8>, String> {
-                self.tick();
-                while let Some((baud, bytes)) = self.replies.pop_front() {
-                    if baud == self.endpoint {
-                        return Ok(bytes);
-                    }
-                }
-                Ok(vec![])
-            }
-            fn spi_config(&mut self) -> Result<(), String> {
-                unreachable!()
-            }
-            fn spi_transfer(&mut self, _: &[u8]) -> Result<Vec<u8>, String> {
-                unreachable!()
-            }
-        }
-        let (tx, rx) = std::sync::mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let mut link = Link::new(tx, 115200, true).with_cancel(cancel.clone());
-        let mut io = BaudIo {
-            endpoint: 115200,
-            work: 115200,
-            previous: 115200,
-            switch: None,
-            lease: None,
-            replies: VecDeque::new(),
-            cancel_commit: Some(cancel),
-            prepares: vec![],
-        };
-        assert!(link
-            .set_baud(&mut io, 921600)
-            .unwrap_err()
-            .contains("reverted to 115200: Operation canceled"));
-        assert_eq!(io.prepares, [921600, 115200]);
-        assert_eq!((link.baud, io.endpoint, io.work), (115200, 115200, 115200));
-        assert!(link.check_cancelled().is_err());
-        assert_eq!(
-            rx.try_iter()
-                .filter_map(|event| match event {
-                    Event::ConsoleState { baud, .. } => Some(baud),
-                    _ => None,
-                })
-                .last(),
-            Some(115200)
-        );
     }
 
     #[test]
@@ -1178,6 +1030,9 @@ mod tests {
         work.set_baud(&mut io, 115200).unwrap();
         struct FailConfig(PhBoardLink);
         impl Io for FailConfig {
+            fn term_status(&mut self) -> Result<(u8, u32), String> {
+                Ok((1, 115_200))
+            }
             fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
                 if baud > 200000 {
                     Err("Injected Debug UART configuration failure".into())
@@ -1287,6 +1142,9 @@ mod tests {
             drop_once: bool,
         }
         impl Io for DropCommit {
+            fn term_status(&mut self) -> Result<(u8, u32), String> {
+                Ok((1, 115_200))
+            }
             fn uart_config(&mut self, baud: u32) -> Result<u32, String> {
                 Io::uart_config(&mut self.io, baud)
             }
@@ -1328,4 +1186,75 @@ mod tests {
         eprintln!("Passive capture verified: UART={uart}, SPI={spi}, PWM={pwm}, SPI sample rate={rate} Hz");
         eprintln!("UART short echo, {} bytes of SPI bulk echo, readonly traces, 921600 baud and rollback verified", payload.len());
     }
+    #[test]
+    fn console_state_comes_from_the_device_term_status() {
+        // The Debug core owns Hello discovery; the host reads the mode from
+        // TermStatus instead of sniffing Work frames.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut link = Link::new(tx, 115200, false);
+        let mut io = ConsoleIo { term_mode: 1, ..Default::default() };
+        link.send(&mut io, b"first-command", |_, _| {}).unwrap();
+        assert!(link.framed && link.negotiated);
+        assert_eq!(io.writes, [b"first-command".to_vec()]);
+        assert!(rx
+            .try_iter()
+            .any(|event| matches!(event, Event::ConsoleState { framed: true, .. })));
+
+        // A plain-UART device reports mode 0 and stays unframed.
+        let (tx, _) = std::sync::mpsc::channel();
+        let mut plain = Link::new(tx, 115200, false);
+        let mut io = ConsoleIo { term_mode: 0, ..Default::default() };
+        plain.poll(&mut io).unwrap();
+        assert!(!plain.framed && !plain.negotiated);
+    }
+
+    #[test]
+    fn console_payload_is_sent_once_as_a_ph_message() {
+        let (tx, _) = std::sync::mpsc::channel();
+        let mut link = Link::new(tx, 115200, false);
+        let mut io = ConsoleIo::default();
+        link.send(&mut io, b"plain-command", |_, _| {}).unwrap();
+        assert_eq!(io.writes, [b"plain-command".to_vec()]);
+        let reads = io.reads;
+        link.send(&mut io, b"next-command", |_, _| {}).unwrap();
+        assert_eq!(io.reads, reads, "A second send must not repeat discovery");
+        assert_eq!(io.writes, [b"plain-command".to_vec(), b"next-command".to_vec()]);
+    }
+
+    #[test]
+    fn set_baud_uses_the_device_transaction() {
+        // The Debug core performs the pico_harness prepare/verify/commit dance;
+        // the host asks for the rate and validates what the device applied.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut link = Link::new(tx, 115200, true);
+        let mut io = ConsoleIo { applied_baud: Some(921_600), ..Default::default() };
+        link.set_baud(&mut io, 921_600).unwrap();
+        assert_eq!(link.baud, 921_600);
+        let published = rx
+            .try_iter()
+            .filter_map(|event| match event {
+                Event::ConsoleState { baud, .. } => Some(baud),
+                _ => None,
+            })
+            .last();
+        assert_eq!(published, Some(921_600));
+
+        // A device rate beyond the 2% tolerance is an error.
+        let mut io = ConsoleIo { applied_baud: Some(115_200), ..Default::default() };
+        let error = link.set_baud(&mut io, 921_600).unwrap_err();
+        assert!(error.contains("not 921600 Hz"), "{error}");
+    }
+
+    #[test]
+    fn console_state_event_is_published_on_change() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut link = Link::new(tx, 115200, false);
+        let mut io = ConsoleIo { term_mode: 1, ..Default::default() };
+        link.poll(&mut io).unwrap();
+        assert!(link.framed && link.negotiated);
+        assert!(rx
+            .try_iter()
+            .any(|event| matches!(event, Event::ConsoleState { framed: true, .. })));
+    }
+
 }

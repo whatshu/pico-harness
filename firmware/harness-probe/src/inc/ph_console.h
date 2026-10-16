@@ -52,6 +52,9 @@ bool ph_console_baud(uint32_t baud, uint32_t *actual);
 
 ph_console_mode_t ph_console_mode(void);
 
+/* core1: the currently applied Work UART baud rate. */
+uint32_t ph_console_baud_get(void);
+
 
 void ph_console_reset(void);
 

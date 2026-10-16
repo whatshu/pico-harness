@@ -337,6 +337,11 @@ ph_console_mode_t ph_console_mode(void)
     return mode;
 }
 
+uint32_t ph_console_baud_get(void)
+{
+    return current_baud;
+}
+
 void ph_console_reset(void)
 {
     mode = PH_CONSOLE_PLAIN;

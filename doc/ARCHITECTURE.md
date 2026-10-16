@@ -62,7 +62,7 @@ message PhMessage {
     ConsoleTx console_tx = 32;    bytes data       // ≤128B,host→Debug→Work
     ConsoleData console_data = 33; bytes data      // Debug→host(短)
     TermConfig term_config = 34;  {baud,data_bits,stop_bits,parity}
-    TermStatus term_status = 35;
+    TermStatus term_status = 35;  {rx_available,tx_space,overruns,mode,actual_baud}
     // bulk 协调(载荷在 IF3)
     BulkTxBegin bulk_tx_begin = 40; {route,len,crc32c}
     BulkTxDone  bulk_tx_done  = 41; {ok,crc_recv}

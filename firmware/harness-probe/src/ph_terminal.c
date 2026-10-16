@@ -338,16 +338,19 @@ static void exec_term_config(uint32_t seq, const ph_term_config_t *tc)
 
 static void exec_term_status(uint32_t seq)
 {
-    uint16_t rx_available, tx_space;
-    uint32_t overruns;
-    if (!ph_fw_target_serial_status(0, &rx_available, &tx_space, &overruns)) {
-        ph_send_status(seq, PH_STATUS_ERR_ARG);
-        return;
-    }
+    uint16_t rx_available = 0, tx_space = 0;
+    uint32_t overruns = 0;
+    /* FIFO counters are best-effort; the mode/baud report always answers so a
+     * host can tell plain-UART from pico_harness without probing Work. */
+    ph_fw_target_serial_status(0, &rx_available, &tx_space, &overruns);
     ph_term_status_t st = picoharness_v1_TermStatus_init_default;
     st.rx_available = rx_available;
     st.tx_space = tx_space;
     st.overruns = overruns;
+    st.mode = ph_console_mode() == PH_CONSOLE_HARNESS
+                  ? picoharness_v1_ConsoleMode_CONSOLE_HARNESS
+                  : picoharness_v1_ConsoleMode_CONSOLE_PLAIN;
+    st.actual_baud = ph_console_baud_get();
     ph_send_body(seq, PH_STATUS_OK, picoharness_v1_PhMessage_term_status_tag,
                  &st, sizeof(st));
 }

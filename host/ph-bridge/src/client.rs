@@ -238,6 +238,21 @@ impl<T: Transport> PhClient<T> {
         self.expect_ok(&req)
     }
 
+    /// Console bridge status (mode/baud/fifo counters) as the Debug core sees
+    /// the Work UART.
+    pub fn term_status(&mut self) -> Result<TermStatus, PhError> {
+        let req = PhMessage {
+            seq: self.next_seq(),
+            body: Some(ph_message::Body::TermStatus(TermStatus::default())),
+            ..Default::default()
+        };
+        let resp = self.request(&req)?;
+        match resp.body {
+            Some(ph_message::Body::TermStatus(st)) => Ok(st),
+            _ => Err(self.status_err(resp)),
+        }
+    }
+
     pub fn debug_bootsel(&mut self) -> Result<(), PhError> {
         let req = PhMessage {
             seq: self.next_seq(),

@@ -102,10 +102,18 @@ message TermConfig {
   uint32 actual_baud = 5;   // response: applied baud rate
 }
 
+// Console bridge mode, as decided by the Debug core's Hello discovery.
+enum ConsoleMode {
+  CONSOLE_PLAIN   = 0;  // Work runs a plain UART console
+  CONSOLE_HARNESS = 1;  // Work announced pico_harness; console Tx is framed
+}
+
 message TermStatus {
-  uint32 rx_available = 1;
+  uint32 rx_available = 1;   // bytes waiting on the Work UART
   uint32 tx_space     = 2;
   uint32 overruns     = 3;
+  ConsoleMode mode    = 4;   // console bridge mode
+  uint32 actual_baud  = 5;   // applied Work UART baud rate
 }
 
 // ---------------------------------------------------------------------------

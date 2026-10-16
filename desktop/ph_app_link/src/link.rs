@@ -163,6 +163,13 @@ impl PhBoardLink {
         self.client.term_config(baud, 8, 1, 0).map_err(map)
     }
 
+    /// Console bridge status from the Debug core:
+    /// `(mode, actual_baud, rx_available, tx_space)` where mode 1 = harness.
+    pub fn term_status(&mut self) -> Result<(i32, u32, u32, u32)> {
+        let st = self.client.term_status().map_err(map)?;
+        Ok((st.mode, st.actual_baud, st.rx_available, st.tx_space))
+    }
+
     // ---- moved to dedicated interfaces ----------------------------------
 
     pub fn command(&mut self, _command: Command, _payload: &[u8]) -> Result<Vec<u8>> {
