@@ -98,7 +98,6 @@ pub(crate) struct OpenedInterface {
     pub interface: u8,
     pub endpoint_out: u8,
     pub endpoint_in: u8,
-    pub serial: Option<String>,
 }
 
 /// Scan connected devices and open the first one whose interface matches the
@@ -137,7 +136,6 @@ pub(crate) fn open_selector(
             interface,
             endpoint_out,
             endpoint_in,
-            serial,
         });
     }
     let suffix = selector

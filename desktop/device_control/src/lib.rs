@@ -1,8 +1,11 @@
 //! Rust access to the dualcore Debug Core device.
 //!
-//! The board exposes two independent USB bulk interfaces. [`PdbgLink`] carries
-//! board I/O and power commands using the PDBG protocol, while [`CmsisDap`]
-//! drives Work-core SWD through the standard CMSIS-DAP v2 interface.
+//! [`PdbgLink`] carries board control (power, measurement, console, baud) over
+//! the PH protocol on the CDC `PH Terminal`; it is a thin adapter over the
+//! `ph_bridge` crate (see `host/ph-bridge` and `doc/ARCHITECTURE.md`).
+//! [`CmsisDap`] drives Work-core SWD through the standard CMSIS-DAP v2
+//! interface. The name `PdbgLink` is kept because the desktop app still calls
+//! it; the PDBG wire protocol itself is retired.
 
 mod cmsis_dap;
 mod error;

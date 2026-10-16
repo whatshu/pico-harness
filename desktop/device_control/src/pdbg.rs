@@ -1,516 +1,287 @@
-use std::time::{Duration, Instant};
+//! `PdbgLink` — the Debug-core control link, now carried by the PH protocol.
+//!
+//! The board used to expose a private PDBG vendor interface; the firmware
+//! replaced it with the PH protocol on the CDC `PH Terminal` (see
+//! `proto/ph.proto` and `doc/ARCHITECTURE.md`). This type keeps the call
+//! surface the desktop app already uses and forwards it to `ph_bridge`.
+//!
+//! Channels that moved to dedicated interfaces are rejected with
+//! [`Error::InvalidArgument`] rather than silently mis-driving the board:
+//!   - Work console  -> PH `ConsoleTx` / `ConsoleData` messages
+//!   - bulk transfers -> vendor `PH Terminal Bulk` (route `WORK_SPI`)
+//!   - logic capture  -> SUMP on the Logic Analyzer CDC (libsigrok `ols`)
 
-use rusb::{DeviceHandle, GlobalContext};
+use ph_bridge::client::SerialTransport;
+use ph_bridge::{PhClient, PhError};
 
 use crate::error::{Error, Result};
-use crate::protocol::{
-    CaptureResult, Command, Frame, Measurement, PowerStatus, UartStatus, HEADER_SIZE, MAX_PAYLOAD,
-};
+use crate::protocol::{CaptureResult, CaptureStatus, Command, Measurement, PowerStatus, UartStatus};
 use crate::usb::{self, DeviceSelector};
 
-const PDBG_INTERFACE_CLASS: u8 = 0xff;
-const PDBG_INTERFACE_SUBCLASS: u8 = 0x50;
-const PDBG_INTERFACE_PROTOCOL: u8 = 0x01;
-const DEFAULT_TIMEOUT: Duration = Duration::from_millis(2000);
+fn map(error: PhError) -> Error {
+    Error::UnexpectedResponse {
+        command: 0,
+        detail: error.to_string(),
+    }
+}
+
+/// Capabilities that are no longer reachable through the control link.
+fn moved(channel: &str) -> Error {
+    Error::InvalidArgument(format!(
+        "{channel} moved off the control link; see doc/ARCHITECTURE.md"
+    ))
+}
 
 pub struct PdbgLink {
-    handle: DeviceHandle<GlobalContext>,
-    interface: u8,
-    endpoint_out: u8,
-    endpoint_in: u8,
-    sequence: u32,
-    receive_buffer: Vec<u8>,
+    client: PhClient<SerialTransport>,
     pub serial: Option<String>,
+    tty: String,
 }
 
 impl PdbgLink {
-    pub fn usb_location(&self) -> Result<usb::Location> {
-        let device = self.handle.device();
-        Ok(usb::Location {
-            bus: device.bus_number(),
-            ports: device.port_numbers()?,
+    fn connect(serial: Option<String>) -> Result<Self> {
+        let devices = ph_bridge::device::scan();
+        let chosen = devices
+            .into_iter()
+            .find(|d| match (&serial, &d.serial) {
+                (Some(want), Some(got)) => want == got,
+                (Some(_), None) => false,
+                (None, _) => true,
+            })
+            .ok_or_else(|| {
+                Error::DeviceNotFound(match &serial {
+                    Some(s) => format!(" (serial {s})"),
+                    None => String::new(),
+                })
+            })?;
+        let tty = chosen
+            .terminal_tty
+            .ok_or_else(|| Error::DeviceNotFound(" (no PH Terminal tty)".into()))?
+            .to_string_lossy()
+            .into_owned();
+        let client = PhClient::open_serial(&tty).map_err(map)?;
+        Ok(Self {
+            client,
+            serial: chosen.serial,
+            tty,
         })
     }
-    pub fn enter_debug_bootsel(&mut self) -> Result<()> {
-        self.command_ok(Command::DebugEnterBootsel, b"BOOT")
-            .map(|_| ())
-    }
+
     pub fn open() -> Result<Self> {
-        Self::open_with_selector(DeviceSelector::any())
+        Self::connect(None)
     }
 
     pub fn open_serial(serial: impl Into<String>) -> Result<Self> {
-        Self::open_with_selector(DeviceSelector::serial(serial))
+        Self::connect(Some(serial.into()))
     }
 
     pub fn open_with_selector(selector: DeviceSelector) -> Result<Self> {
-        let opened = usb::open_selector(
-            &selector,
-            PDBG_INTERFACE_CLASS,
-            PDBG_INTERFACE_SUBCLASS,
-            PDBG_INTERFACE_PROTOCOL,
-        )?;
-        Ok(Self {
-            handle: opened.handle,
-            interface: opened.interface,
-            endpoint_out: opened.endpoint_out,
-            endpoint_in: opened.endpoint_in,
-            sequence: 0,
-            receive_buffer: Vec::with_capacity(HEADER_SIZE + MAX_PAYLOAD + 4),
-            serial: opened.serial,
-        })
+        Self::connect(selector.serial.clone())
+    }
+
+    /// The control port this link is bound to (`/dev/ttyACM*`).
+    pub fn port(&self) -> &str {
+        &self.tty
+    }
+
+    /// USB topology of the probe this link is bound to. The control link is a
+    /// serial port, so the bus/port chain is read back from the enumerator.
+    pub fn usb_location(&self) -> Result<usb::Location> {
+        for device in rusb::devices()?.iter() {
+            let descriptor = device.device_descriptor()?;
+            if descriptor.vendor_id() != usb::USB_VENDOR_ID
+                || descriptor.product_id() != usb::USB_PRODUCT_ID
+            {
+                continue;
+            }
+            let serial = device
+                .open()
+                .ok()
+                .and_then(|handle| handle.read_serial_number_string_ascii(&descriptor).ok());
+            if serial == self.serial {
+                return Ok(usb::Location {
+                    bus: device.bus_number(),
+                    ports: device.port_numbers().unwrap_or_default(),
+                });
+            }
+        }
+        Err(Error::DeviceNotFound(String::new()))
     }
 
     pub fn interface_number(&self) -> u8 {
-        self.interface
+        1 // CDC "PH Terminal" control interface
     }
 
-    pub fn command(&mut self, command: Command, payload: &[u8]) -> Result<Vec<u8>> {
-        self.command_timeout(command, payload, DEFAULT_TIMEOUT)
-    }
-
-    pub fn command_timeout(
-        &mut self,
-        command: Command,
-        payload: &[u8],
-        timeout: Duration,
-    ) -> Result<Vec<u8>> {
-        let sequence = self.next_sequence();
-        let request = Frame::request(command, sequence, payload).encode()?;
-        self.handle
-            .write_bulk(self.endpoint_out, &request, timeout)?;
-        let response = self.read_frame(timeout)?;
-        if response.sequence != sequence {
-            return Err(Error::UnexpectedResponse {
-                command: command.into(),
-                detail: format!("sequence {}, expected {sequence}", response.sequence),
-            });
-        }
-        if response.command != command.response() {
-            return Err(Error::UnexpectedResponse {
-                command: command.into(),
-                detail: format!("command 0x{:02x}", response.command),
-            });
-        }
-        Ok(response.payload)
-    }
+    // ---- control plane ---------------------------------------------------
 
     pub fn info(&mut self) -> Result<String> {
-        let payload = self.command_ok(Command::GetInfo, &[])?;
-        let end = payload
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(payload.len());
-        Ok(String::from_utf8_lossy(&payload[..end]).into_owned())
+        Ok(self.client.get_info().map_err(map)?.info)
     }
 
     pub fn status(&mut self) -> Result<PowerStatus> {
-        let payload = self.command(Command::GetStatus, &[])?;
-        PowerStatus::decode(&payload).map_err(|error| match error {
-            crate::protocol::ProtocolError::DeviceStatus(status) => Error::DeviceStatus {
-                command: Command::GetStatus.into(),
-                status,
-            },
-            other => Error::Protocol(other),
+        let s = self.client.get_status().map_err(map)?;
+        Ok(PowerStatus {
+            power_on: s.power_enabled,
+            power_good: s.power_good,
+            alert: s.ina_alert,
+            power_fault: s.work_fault,
+            work_3v3_mv: s.vbus_mv as u16,
         })
     }
 
     pub fn set_power(&mut self, enabled: bool) -> Result<()> {
-        self.command_ok(Command::PowerSet, &[enabled as u8])
-            .map(|_| ())
+        self.client.power_set(enabled).map_err(map)
     }
 
     pub fn reset_pulse(&mut self, milliseconds: u16) -> Result<()> {
-        if milliseconds == 0 || milliseconds > 1000 {
-            return Err(Error::InvalidArgument(
-                "reset pulse must be 1..1000 ms".into(),
-            ));
-        }
-        self.command_ok(Command::ResetPulse, &milliseconds.to_le_bytes())
-            .map(|_| ())
-    }
-
-    pub fn set_bootsel(&mut self, asserted: bool) -> Result<()> {
-        self.command_ok(Command::BootselSet, &[asserted as u8])
-            .map(|_| ())
-    }
-
-    pub fn enter_bootsel(&mut self) -> Result<()> {
-        self.command_ok(Command::EnterBootsel, &[]).map(|_| ())
+        self.client
+            .reset_pulse(u32::from(milliseconds))
+            .map_err(map)
     }
 
     pub fn measure(&mut self) -> Result<Measurement> {
-        let payload = self.command(Command::Measure, &[])?;
-        Measurement::decode(&payload).map_err(|error| match error {
-            crate::protocol::ProtocolError::DeviceStatus(status) => Error::DeviceStatus {
-                command: Command::Measure.into(),
-                status,
-            },
-            other => Error::Protocol(other),
+        let m = self.client.measure().map_err(map)?;
+        Ok(Measurement {
+            shunt_uv: f64::from(m.shunt_uv),
+            bus_mv: f64::from(m.vbus_uv) / 1000.0,
+            current_ma: f64::from(m.current_ua) / 1000.0,
+            power_mw: f64::from(m.power_uw) / 1000.0,
         })
     }
 
+    pub fn enter_debug_bootsel(&mut self) -> Result<()> {
+        self.client.debug_bootsel().map_err(map)
+    }
+
+    /// Short Work console write (PH `ConsoleTx`, up to 128 bytes).
+    pub fn console_write(&mut self, data: &[u8]) -> Result<()> {
+        self.client.console_tx(data).map_err(map)
+    }
+
+    /// Work UART baud through the pico_harness baud transaction.
+    pub fn console_baud(&mut self, baud: u32) -> Result<u32> {
+        self.client.term_config(baud, 8, 1, 0).map_err(map)
+    }
+
+    // ---- moved to dedicated interfaces ----------------------------------
+
+    pub fn command(&mut self, _command: Command, _payload: &[u8]) -> Result<Vec<u8>> {
+        Err(moved("the raw PDBG command channel"))
+    }
+
+    pub fn set_bootsel(&mut self, _asserted: bool) -> Result<()> {
+        Err(moved("work BOOTSEL hold"))
+    }
+
+    pub fn enter_bootsel(&mut self) -> Result<()> {
+        Err(moved("work BOOTSEL entry"))
+    }
+
     pub fn gpio_read(&mut self) -> Result<u32> {
-        let payload = self.command_ok(Command::GpioRead, &[])?;
-        if payload.len() != 4 {
-            return Err(Error::UnexpectedResponse {
-                command: Command::GpioRead.into(),
-                detail: format!("{} GPIO bytes", payload.len()),
-            });
-        }
-        Ok(u32::from_le_bytes(payload.try_into().unwrap()))
+        Err(moved("GPIO snapshot"))
     }
 
     pub fn uart_config(
         &mut self,
-        channel: u8,
+        _channel: u8,
         baud: u32,
-        data_bits: u8,
-        stop_bits: u8,
-        parity: u8,
+        _data_bits: u8,
+        _stop_bits: u8,
+        _parity: u8,
     ) -> Result<u32> {
-        if channel != 0
-            || !(5..=8).contains(&data_bits)
-            || !(1..=2).contains(&stop_bits)
-            || parity > 2
+        // The Work console is a single PH channel; honour the baud request.
+        self.console_baud(baud)
+    }
+
+    pub fn uart_status(&mut self, _channel: u8) -> Result<UartStatus> {
+        Err(moved("UART fifo status"))
+    }
+
+    pub fn uart_write_some(&mut self, _channel: u8, data: &[u8]) -> Result<usize> {
+        self.console_write(data)?;
+        Ok(data.len())
+    }
+
+    pub fn uart_write(
+        &mut self,
+        _channel: u8,
+        data: &[u8],
+        _timeout: std::time::Duration,
+    ) -> Result<usize> {
+        self.console_write(data)?;
+        Ok(data.len())
+    }
+
+    pub fn uart_read(&mut self, _channel: u8, _maximum: u16) -> Result<Vec<u8>> {
+        use ph_bridge::msg::ph_message;
+        let mut out = Vec::new();
+        for event in self
+            .client
+            .recv_events(std::time::Duration::from_millis(200))
         {
-            return Err(Error::InvalidArgument(
-                "unsupported UART configuration".into(),
-            ));
-        }
-        let mut request = Vec::with_capacity(8);
-        request.push(channel);
-        request.extend_from_slice(&baud.to_le_bytes());
-        request.extend_from_slice(&[data_bits, stop_bits, parity]);
-        let payload = self.command_ok(Command::UartConfig, &request)?;
-        if payload.len() != 4 {
-            return Err(Error::UnexpectedResponse {
-                command: Command::UartConfig.into(),
-                detail: format!("{} response bytes", payload.len()),
-            });
-        }
-        Ok(u32::from_le_bytes(payload.try_into().unwrap()))
-    }
-
-    pub fn uart_status(&mut self, channel: u8) -> Result<UartStatus> {
-        let payload = self.command_ok(Command::UartStatus, &[channel])?;
-        if payload.len() != 8 {
-            return Err(Error::UnexpectedResponse {
-                command: Command::UartStatus.into(),
-                detail: format!("{} response bytes", payload.len()),
-            });
-        }
-        Ok(UartStatus {
-            rx_available: u16::from_le_bytes([payload[0], payload[1]]),
-            tx_space: u16::from_le_bytes([payload[2], payload[3]]),
-            rx_overruns: u32::from_le_bytes(payload[4..8].try_into().unwrap()),
-        })
-    }
-
-    /// Queue one bounded UART chunk without retrying a full transmit ring.
-    /// The returned count lets callers enforce their own deadline and cancellation.
-    pub fn uart_write_some(&mut self, channel: u8, data: &[u8]) -> Result<usize> {
-        let size = data.len().min(MAX_PAYLOAD - 1);
-        let mut request = Vec::with_capacity(1 + size);
-        request.push(channel);
-        request.extend_from_slice(&data[..size]);
-        let payload = self.command_ok(Command::UartWrite, &request)?;
-        if payload.len() != 2 {
-            return Err(Error::UnexpectedResponse {
-                command: Command::UartWrite.into(),
-                detail: format!("{} response bytes", payload.len()),
-            });
-        }
-        let accepted = u16::from_le_bytes([payload[0], payload[1]]) as usize;
-        if accepted > size {
-            return Err(Error::UnexpectedResponse {
-                command: Command::UartWrite.into(),
-                detail: "UART accepted more bytes than submitted".into(),
-            });
-        }
-        Ok(accepted)
-    }
-
-    pub fn uart_write(&mut self, channel: u8, data: &[u8], timeout: Duration) -> Result<usize> {
-        let deadline = Instant::now() + timeout;
-        let mut written = 0;
-        while written < data.len() {
-            let end = (written + MAX_PAYLOAD - 1).min(data.len());
-            let accepted = self.uart_write_some(channel, &data[written..end])?;
-            written += accepted;
-            if accepted == 0 {
-                if Instant::now() >= deadline {
-                    return Err(Error::Timeout);
-                }
-                std::thread::sleep(Duration::from_millis(1));
+            if let Some(ph_message::Body::ConsoleData(d)) = event.body {
+                out.extend_from_slice(&d.data);
             }
         }
-        Ok(written)
+        Ok(out)
     }
 
-    pub fn uart_read(&mut self, channel: u8, maximum: u16) -> Result<Vec<u8>> {
-        if maximum as usize > MAX_PAYLOAD - 1 {
-            return Err(Error::InvalidArgument(
-                "UART read is larger than PDBG payload".into(),
-            ));
-        }
-        let mut request = Vec::with_capacity(3);
-        request.push(channel);
-        request.extend_from_slice(&maximum.to_le_bytes());
-        self.command_ok(Command::UartRead, &request)
+    pub fn spi_config(&mut self, _baud: u32, _mode: u8) -> Result<u32> {
+        Err(moved("SPI configuration"))
     }
 
-    pub fn spi_config(&mut self, baud: u32, mode: u8) -> Result<u32> {
-        if mode > 3 {
-            return Err(Error::InvalidArgument("SPI mode must be 0..3".into()));
-        }
-        let mut request = Vec::with_capacity(5);
-        request.extend_from_slice(&baud.to_le_bytes());
-        request.push(mode);
-        let payload = self.command_ok(Command::SpiConfig, &request)?;
-        if payload.len() != 4 {
-            return Err(Error::UnexpectedResponse {
-                command: Command::SpiConfig.into(),
-                detail: format!("{} response bytes", payload.len()),
-            });
-        }
-        Ok(u32::from_le_bytes(payload.try_into().unwrap()))
+    pub fn spi_transfer(&mut self, _data: &[u8]) -> Result<Vec<u8>> {
+        Err(moved("SPI transfers (use the PH Terminal Bulk data plane)"))
     }
 
-    pub fn spi_transfer(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        if data.is_empty() || data.len() > MAX_PAYLOAD - 1 {
-            return Err(Error::InvalidArgument(
-                "SPI transfer must contain 1..4095 bytes".into(),
-            ));
-        }
-        self.command_ok(Command::SpiTransfer, data)
+    pub fn capture(&mut self, _samples: u32, _frequency: u32) -> Result<CaptureResult> {
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
 
-    pub fn capture(&mut self, samples: u32, frequency: u32) -> Result<CaptureResult> {
-        self.capture_triggered(samples, frequency, 0, 5, 1000)
-    }
     pub fn capture_triggered(
         &mut self,
-        samples: u32,
-        frequency: u32,
-        edge: u8,
-        pin: u8,
-        timeout_ms: u16,
+        _samples: u32,
+        _frequency: u32,
+        _edge: u8,
+        _pin: u8,
+        _timeout_ms: u16,
     ) -> Result<CaptureResult> {
-        if !(1..=32768).contains(&samples) || frequency == 0 {
-            return Err(Error::InvalidArgument(
-                "capture size or frequency is invalid".into(),
-            ));
-        }
-        let mut request = Vec::with_capacity(8);
-        request.extend_from_slice(&samples.to_le_bytes());
-        request.extend_from_slice(&frequency.to_le_bytes());
-        if edge != 0 {
-            request.extend([edge, pin]);
-            request.extend(timeout_ms.to_le_bytes());
-            request.extend([0, 0]);
-        }
-        let milliseconds = (samples as u64 * 2000 / frequency as u64).max(if edge == 0 {
-            5000
-        } else {
-            timeout_ms as u64
-        }) + 2000;
-        let payload = self.command_ok_timeout(
-            Command::Capture,
-            &request,
-            Duration::from_millis(milliseconds),
-        )?;
-        if payload.len() != 12 {
-            return Err(Error::UnexpectedResponse {
-                command: Command::Capture.into(),
-                detail: format!("{} response bytes", payload.len()),
-            });
-        }
-        let capture_id = u32::from_le_bytes(payload[0..4].try_into().unwrap());
-        let captured = u32::from_le_bytes(payload[4..8].try_into().unwrap());
-        let elapsed_us = u32::from_le_bytes(payload[8..12].try_into().unwrap());
-        if captured != samples || elapsed_us == 0 {
-            return Err(Error::UnexpectedResponse {
-                command: Command::Capture.into(),
-                detail: format!("captured {captured} samples in {elapsed_us} us"),
-            });
-        }
-        self.read_capture(capture_id, captured, elapsed_us)
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
 
-    pub fn start_capture(&mut self, samples: u32, frequency: u32) -> Result<u32> {
-        self.start_capture_triggered(samples, frequency, 0, 5, 1000)
+    pub fn start_capture(&mut self, _samples: u32, _frequency: u32) -> Result<u32> {
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
+
     pub fn start_capture_triggered(
         &mut self,
-        samples: u32,
-        frequency: u32,
-        edge: u8,
-        pin: u8,
-        timeout_ms: u16,
+        _samples: u32,
+        _frequency: u32,
+        _edge: u8,
+        _pin: u8,
+        _timeout_ms: u16,
     ) -> Result<u32> {
-        if !(1..=32768).contains(&samples) || frequency < 2500 {
-            return Err(Error::InvalidArgument(
-                "Invalid capture size or rate".into(),
-            ));
-        }
-        let mut request = samples.to_le_bytes().to_vec();
-        request.extend(frequency.to_le_bytes());
-        if edge != 0 {
-            request.extend([edge, pin]);
-            request.extend(timeout_ms.to_le_bytes());
-            request.extend([0, 0]);
-        }
-        let response = self.command_ok(Command::CaptureStart, &request)?;
-        Ok(u32::from_le_bytes(response.try_into().map_err(|_| {
-            Error::InvalidArgument("Invalid capture ID reply".into())
-        })?))
-    }
-    pub fn poll_capture(&mut self, capture_id: u32) -> Result<Option<(u32, u32, u32)>> {
-        self.poll_capture_status(capture_id)
-            .map(|status| status.map(|s| (s.sample_hz, s.count, s.elapsed_us)))
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
 
-    pub fn poll_capture_status(
-        &mut self,
-        capture_id: u32,
-    ) -> Result<Option<crate::protocol::CaptureStatus>> {
-        let response = self.command_ok(Command::CapturePoll, &[])?;
-        if response.len() != 20 {
-            return Err(Error::InvalidArgument(
-                "Invalid capture status reply".into(),
-            ));
-        }
-        let word = |i| u32::from_le_bytes(response[i..i + 4].try_into().unwrap());
-        if word(0) != capture_id {
-            return Err(Error::InvalidArgument("Capture was replaced".into()));
-        }
-        let flags = word(12);
-        if flags & 16 != 0 {
-            return Ok(None);
-        }
-        if flags & 14 != 0 {
-            let message = if flags & 4 != 0 {
-                "Trigger timed out; no matching edge was captured"
-            } else if flags & 8 != 0 {
-                "Capture cancelled"
-            } else {
-                "Capture stalled; select a lower sample rate"
-            };
-            return Err(Error::InvalidArgument(message.into()));
-        }
-        let count = word(16);
-        let trigger_index = (flags & 32 != 0).then_some(flags >> 16);
-        if trigger_index.is_some_and(|index| index >= count) {
-            return Err(Error::InvalidArgument(
-                "Invalid pre-trigger position".into(),
-            ));
-        }
-        Ok(Some(crate::protocol::CaptureStatus {
-            sample_hz: word(4),
-            count,
-            elapsed_us: word(8),
-            trigger_index,
-        }))
+    pub fn poll_capture(&mut self, _capture_id: u32) -> Result<Option<(u32, u32, u32)>> {
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
-    pub fn cancel_capture(&mut self) -> Result<()> {
-        self.command_ok(Command::CaptureCancel, &[]).map(|_| ())
+
+    pub fn poll_capture_status(&mut self, _capture_id: u32) -> Result<Option<CaptureStatus>> {
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
 
     pub fn read_capture(
         &mut self,
-        capture_id: u32,
-        captured: u32,
-        elapsed_us: u32,
+        _capture_id: u32,
+        _captured: u32,
+        _elapsed_us: u32,
     ) -> Result<CaptureResult> {
-        if !(1..=32768).contains(&captured) || elapsed_us == 0 {
-            return Err(Error::InvalidArgument("Invalid completed capture".into()));
-        }
-        let mut values = Vec::with_capacity(captured as usize);
-        let mut offset = 0u32;
-        while offset < captured {
-            let count = (captured - offset).min(1023) as u16;
-            let mut read_request = Vec::with_capacity(10);
-            read_request.extend_from_slice(&capture_id.to_le_bytes());
-            read_request.extend_from_slice(&offset.to_le_bytes());
-            read_request.extend_from_slice(&count.to_le_bytes());
-            let chunk = self.command_ok(Command::CaptureRead, &read_request)?;
-            if chunk.len() != count as usize * 4 {
-                return Err(Error::UnexpectedResponse {
-                    command: Command::CaptureRead.into(),
-                    detail: format!("{} bytes for {count} samples", chunk.len()),
-                });
-            }
-            for sample in chunk.chunks_exact(4) {
-                values.push(u32::from_le_bytes(sample.try_into().unwrap()));
-            }
-            offset += count as u32;
-        }
-        Ok(CaptureResult {
-            capture_id,
-            elapsed_us,
-            samples: values,
-        })
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
 
-    fn command_ok(&mut self, command: Command, payload: &[u8]) -> Result<Vec<u8>> {
-        self.command_ok_timeout(command, payload, DEFAULT_TIMEOUT)
-    }
-
-    fn command_ok_timeout(
-        &mut self,
-        command: Command,
-        payload: &[u8],
-        timeout: Duration,
-    ) -> Result<Vec<u8>> {
-        let response = self.command_timeout(command, payload, timeout)?;
-        if response.is_empty() {
-            return Err(Error::UnexpectedResponse {
-                command: command.into(),
-                detail: "empty status payload".into(),
-            });
-        }
-        if response[0] != 0 {
-            return Err(Error::DeviceStatus {
-                command: command.into(),
-                status: response[0],
-            });
-        }
-        Ok(response[1..].to_vec())
-    }
-
-    fn next_sequence(&mut self) -> u32 {
-        self.sequence = self.sequence.wrapping_add(1).max(1);
-        self.sequence
-    }
-
-    fn read_frame(&mut self, timeout: Duration) -> Result<Frame> {
-        let deadline = Instant::now() + timeout;
-        let mut chunk = [0u8; 512];
-        loop {
-            if let Some(total) = Frame::total_length_from_prefix(&self.receive_buffer)? {
-                if self.receive_buffer.len() >= total {
-                    let packet: Vec<u8> = self.receive_buffer.drain(..total).collect();
-                    return Ok(Frame::decode(&packet)?);
-                }
-            }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(Error::Timeout);
-            }
-            let count = self
-                .handle
-                .read_bulk(self.endpoint_in, &mut chunk, remaining)?;
-            if count == 0 {
-                return Err(Error::Timeout);
-            }
-            self.receive_buffer.extend_from_slice(&chunk[..count]);
-        }
-    }
-}
-
-impl Drop for PdbgLink {
-    fn drop(&mut self) {
-        let _ = self.handle.release_interface(self.interface);
+    pub fn cancel_capture(&mut self) -> Result<()> {
+        Err(moved("logic capture (use SUMP on the Logic Analyzer CDC)"))
     }
 }

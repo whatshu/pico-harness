@@ -119,7 +119,6 @@ impl CmsisDap {
             interface,
             endpoint_out,
             endpoint_in,
-            serial: _,
         } = opened;
         Ok(Self {
             handle,
