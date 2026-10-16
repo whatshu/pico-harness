@@ -1,0 +1,33 @@
+[package]
+name = "ph-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Pico Harness Bridge: PC <-> Debug core connectivity (PH protocol over CDC + bulk data plane)"
+license = "MIT"
+
+[lib]
+name = "ph_bridge"
+
+[dependencies]
+prost = "0.13"
+thiserror = "1"
+serialport = "4"
+rusb = "0.9"
+
+[build-dependencies]
+prost-build = "0.13"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+hex = "0.4"
+tempfile = "3"
+
+[features]
+default = []
+# Python bindings (PyO3). Building or installing requires `cargo build --features python`.
+python = ["dep:pyo3"]
+
+[dependencies.pyo3]
+version = "0.23"
+optional = true
+features = ["extension-module"]

@@ -72,6 +72,7 @@ build_work_selftest() {
 
 run_tests() {
   PYTHONPATH="$root_dir/host" python3 -m unittest discover -s "$root_dir/host/tests" -p 'test_*.py' || return
+  cargo test --manifest-path "$root_dir/host/ph-bridge/Cargo.toml" --lib || return
   bash -n "$root_dir/build.sh" || return
   for wrapper in "$root_dir"/script/*.sh; do bash -n "$wrapper" || return; done
   python3 "$root_dir/host/tools/check_pinmap.py"
