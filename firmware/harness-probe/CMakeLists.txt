@@ -33,6 +33,9 @@ add_executable(harness-probe
         src/util.c
         src/target_io.c
         src/target_control.c
+        src/ph_terminal.c
+        src/ph_bulk.c
+        src/ph.pb.c
 )
 
 target_sources(harness-probe PRIVATE
@@ -40,11 +43,15 @@ target_sources(harness-probe PRIVATE
         ${PROJECT_ROOT}/third_party/cmsis-dap/CMSIS/DAP/Firmware/Source/JTAG_DP.c
         ${PROJECT_ROOT}/third_party/cmsis-dap/CMSIS/DAP/Firmware/Source/DAP_vendor.c
         ${PROJECT_ROOT}/third_party/cmsis-dap/CMSIS/DAP/Firmware/Source/SWO.c
+        ${PROJECT_ROOT}/third_party/nanopb/pb_common.c
+        ${PROJECT_ROOT}/third_party/nanopb/pb_encode.c
+        ${PROJECT_ROOT}/third_party/nanopb/pb_decode.c
         )
 
 target_include_directories(harness-probe PRIVATE
         ${PROJECT_ROOT}/third_party/cmsis-dap/CMSIS/DAP/Firmware/Include/
         ${PROJECT_ROOT}/third_party/cmsis-dap/CMSIS/Core/Include/
+        ${PROJECT_ROOT}/third_party/nanopb/
         include/
         boards/
         )
@@ -54,6 +61,7 @@ target_compile_options(harness-probe PRIVATE -Wall)
 pico_generate_pio_header(harness-probe ${CMAKE_CURRENT_LIST_DIR}/src/pio/probe.pio)
 
 target_include_directories(harness-probe PRIVATE src/inc)
+target_include_directories(harness-probe PRIVATE src)
 
 # add version
 add_custom_target(version

@@ -28,15 +28,24 @@
 
 #define DAP_OUT_EP_NUM 0x04
 #define DAP_IN_EP_NUM 0x85
-#define PDBG_LINK_OUT_EP_NUM 0x09
-#define PDBG_LINK_IN_EP_NUM 0x8A
+#define CDC0_NOTIFY_EP_NUM 0x82
+#define CDC0_OUT_EP_NUM 0x02
+#define CDC0_IN_EP_NUM 0x83
+#define BULK_OUT_EP_NUM 0x05
+#define BULK_IN_EP_NUM 0x86
+#define CDC1_NOTIFY_EP_NUM 0x81
+#define CDC1_OUT_EP_NUM 0x06
+#define CDC1_IN_EP_NUM 0x87
 
-#define TUD_PDBG_LINK_DESCRIPTOR(_itfnum, _stridx, _epout, _epin, _epsize)                     \
-    9, TUSB_DESC_INTERFACE, _itfnum, 0, 2, TUSB_CLASS_VENDOR_SPECIFIC, 0x50, 0x01, _stridx, 7, \
-        TUSB_DESC_ENDPOINT, _epout, TUSB_XFER_BULK, U16_TO_U8S_LE(_epsize), 0, 7,              \
+/* PH Terminal Bulk is a generic vendor interface (FF/50/01), distinct from the
+ * CMSIS-DAP driver's FF/00/00 so the built-in TinyUSB vendor class claims it. */
+#define TUD_PH_BULK_DESCRIPTOR(_itfnum, _stridx, _epout, _epin, _epsize)                        \
+    9, TUSB_DESC_INTERFACE, _itfnum, 0, 2, TUSB_CLASS_VENDOR_SPECIFIC, 0x50, 0x01, _stridx, 7,  \
+        TUSB_DESC_ENDPOINT, _epout, TUSB_XFER_BULK, U16_TO_U8S_LE(_epsize), 0, 7,               \
         TUSB_DESC_ENDPOINT, _epin, TUSB_XFER_BULK, U16_TO_U8S_LE(_epsize), 0
 
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + (2 * TUD_VENDOR_DESC_LEN))
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN + \
+                          TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN)
 #define MS_OS_20_DESC_LEN 0xB2
 #define BOS_TOTAL_LEN (TUD_BOS_DESC_LEN + TUD_BOS_MICROSOFT_OS_DESC_LEN)
 
@@ -48,9 +57,13 @@
 #define RD_SLOT_PTR(x) &(x.data[RD_IDX(x)][0])
 
 enum {
-    ITF_NUM_PROBE, /* Old versions of Keil MDK only look at interface 0 */
-    ITF_NUM_PDBG_LINK,
-    ITF_NUM_TOTAL
+    ITF_DAP, /* Old versions of Keil MDK only look at interface 0 */
+    ITF_CDC0,
+    ITF_CDC0_DATA,
+    ITF_BULK,
+    ITF_CDC1,
+    ITF_CDC1_DATA,
+    ITF_TOTAL
 };
 
 typedef struct {
@@ -136,12 +149,15 @@ tusb_desc_device_t const desc_device = {
 
 /* Configuration descriptor */
 uint8_t const desc_configuration[] = {
-    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0, 100),
-    /* Interface 0 */
-    /* Bulk (named interface) */
-    TUD_VENDOR_DESCRIPTOR(ITF_NUM_PROBE, 4, DAP_OUT_EP_NUM, DAP_IN_EP_NUM, 64),
-    /* Interface 1: all non-SWD board I/O over one high-throughput bulk link. */
-    TUD_PDBG_LINK_DESCRIPTOR(ITF_NUM_PDBG_LINK, 5, PDBG_LINK_OUT_EP_NUM, PDBG_LINK_IN_EP_NUM, 64),
+    TUD_CONFIG_DESCRIPTOR(1, ITF_TOTAL, 0, CONFIG_TOTAL_LEN, 0, 100),
+    /* Interface 0: CMSIS-DAP v2 (SWD). Keil MDK expects interface 0. */
+    TUD_VENDOR_DESCRIPTOR(ITF_DAP, 4, DAP_OUT_EP_NUM, DAP_IN_EP_NUM, 64),
+    /* Interface 1,2 (CDC): PH Terminal -- all control/console messages. */
+    TUD_CDC_DESCRIPTOR(ITF_CDC0, 5, CDC0_NOTIFY_EP_NUM, 8, CDC0_OUT_EP_NUM, CDC0_IN_EP_NUM, 64),
+    /* Interface 3 (vendor, FF/50/01): PH Terminal Bulk -- raw payload data plane. */
+    TUD_PH_BULK_DESCRIPTOR(ITF_BULK, 6, BULK_OUT_EP_NUM, BULK_IN_EP_NUM, 64),
+    /* Interface 4,5 (CDC): Logic Analyzer (SUMP) -- reserved for the SUMP phase. */
+    TUD_CDC_DESCRIPTOR(ITF_CDC1, 7, CDC1_NOTIFY_EP_NUM, 8, CDC1_OUT_EP_NUM, CDC1_IN_EP_NUM, 64),
 };
 
 TU_VERIFY_STATIC(sizeof(desc_configuration) == CONFIG_TOTAL_LEN,
@@ -155,7 +171,9 @@ char const *string_desc_arr[] = {
     PROBE_PRODUCT_STRING, /* 2: Product */
     usb_serial, /* 3: Serial, uses flash unique ID */
     "CMSIS-DAP v2 Interface", /* 4: Interface descriptor for Bulk transport */
-    "PDBG Link", /* 5: UART/SPI/GPIO/control bulk interface */
+    "PH Terminal", /* 5: PH protocol channel (control/console/coordination) */
+    "PH Terminal Bulk", /* 6: raw payload data plane */
+    "Pico Harness Logic Analyzer", /* 7: SUMP logic analyzer */
 };
 
 static uint16_t _desc_str[32];
@@ -191,7 +209,7 @@ uint8_t const desc_ms_os_20[] = {
     U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A),
 
     /* Function Subset header: length, type, first interface, reserved, subset length */
-    U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), ITF_NUM_PROBE, 0,
+    U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), ITF_DAP, 0,
     U16_TO_U8S_LE(MS_OS_20_DESC_LEN - 0x0A - 0x08),
 
     /* MS OS 2.0 Compatible ID descriptor: length, type, compatible ID, sub compatible ID */
