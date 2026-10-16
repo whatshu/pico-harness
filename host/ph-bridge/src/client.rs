@@ -145,6 +145,25 @@ impl<T: Transport> PhClient<T> {
         self.events.drain(..).collect()
     }
 
+    /// Wait up to `duration` for unsolicited events (no request sent).
+    /// Used by the console reader to watch for work output.
+    pub fn recv_events(&mut self, duration: Duration) -> Vec<PhMessage> {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            if let Some(frame) = self.fb.try_next().unwrap_or(None) {
+                self.events.push_back(frame);
+                continue;
+            }
+            let mut tmp = [0u8; 64];
+            if let Ok(n) = self.transport.recv(&mut tmp) {
+                if n > 0 {
+                    self.fb.extend(&tmp[..n]);
+                }
+            }
+        }
+        self.events.drain(..).collect()
+    }
+
     fn expect_ok(&mut self, msg: &PhMessage) -> Result<(), PhError> {
         let resp = self.request(msg)?;
         if resp.status != Status::Ok as i32 {
@@ -428,6 +447,26 @@ mod tests {
         let mut client = PhClient::new(tr);
         client.power_set(true).unwrap();
         let events = client.drain_events();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].body, Some(ph_message::Body::ConsoleData(_))));
+    }
+
+    #[test]
+    fn recv_events_collects_unsolicited_output() {
+        let mut tr = ScriptedTransport {
+            recv: Vec::new(),
+            queue: Vec::new(),
+            seq_seen: 0,
+        };
+        let mut cd = ConsoleData::default();
+        cd.data.extend_from_slice(b"hi");
+        tr.recv.extend(framing::encode(&PhMessage {
+            seq: 0,
+            body: Some(ph_message::Body::ConsoleData(cd)),
+            ..Default::default()
+        }));
+        let mut client = PhClient::new(tr);
+        let events = client.recv_events(Duration::from_millis(50));
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0].body, Some(ph_message::Body::ConsoleData(_))));
     }

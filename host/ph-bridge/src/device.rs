@@ -86,8 +86,10 @@ fn scan_linux() -> Vec<PhDeviceInfo> {
             }
         };
         match ifnum {
-            2 => phdev.terminal_tty = Some(tty),
-            5 => phdev.la_tty = Some(tty),
+            // Linux cdc_acm may bind the tty to the COMM (1/4) or DATA (2/5)
+            // interface; accept either for each channel.
+            1 | 2 => phdev.terminal_tty = Some(tty),
+            4 | 5 => phdev.la_tty = Some(tty),
             _ => {}
         }
     }

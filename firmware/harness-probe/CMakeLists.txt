@@ -34,6 +34,7 @@ add_executable(harness-probe
         src/target_io.c
         src/target_control.c
         src/ph_terminal.c
+        src/ph_console.c
         src/ph_bulk.c
         src/ph.pb.c
 )

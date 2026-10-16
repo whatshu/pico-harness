@@ -9,6 +9,7 @@
 #include "pb_encode.h"
 
 #include "ph_bulk.h"
+#include "ph_console.h"
 #include "ph_terminal.h"
 #include "target.h"
 #include "util.h"
@@ -314,15 +315,14 @@ static void exec_console_tx(uint32_t seq, const ph_console_tx_t *tx)
         ph_send_status(seq, PH_STATUS_ERR_NOTREADY);
         return;
     }
-    target_serial_write(0, tx->data.bytes, tx->data.size);
+    ph_console_write(tx->data.bytes, tx->data.size);
     ph_send_status(seq, PH_STATUS_OK);
 }
 
 static void exec_term_config(uint32_t seq, const ph_term_config_t *tc)
 {
     uint32_t actual;
-    if (!target_serial_config(0, tc->baud, (uint8_t)tc->data_bits,
-                              (uint8_t)tc->stop_bits, (uint8_t)tc->parity, &actual)) {
+    if (!ph_console_baud(tc->baud, &actual)) {
         ph_send_status(seq, PH_STATUS_ERR_ARG);
         return;
     }

@@ -8,6 +8,7 @@
 
 #include "logic_analyzer.h"
 #include "ph_bulk.h"
+#include "ph_console.h"
 #include "ph_terminal.h"
 #include "target.h"
 #include "worker.h"
@@ -24,6 +25,7 @@ void worker_init(void)
 {
     ph_terminal_init();
     ph_bulk_init();
+    ph_console_init();
 
     /* The LA engine is kept armed for the SUMP phase; la_init claims PIO1. */
     la_init();
@@ -33,6 +35,7 @@ void worker_reset(void)
 {
     ph_terminal_reset();
     ph_bulk_reset();
+    ph_console_reset();
     debug_boot_requested = false;
     debug_boot_deadline = 0;
 }
@@ -59,17 +62,9 @@ void worker_thread(void)
     /* Core 1 has no RTOS tick, USB ISR, DMA ISR or FIFO doorbell ISR. */
     save_and_disable_interrupts();
 
-    uint8_t console[64];
     for (;;) {
         target_serial_poll();
-
-        /* Work UART output -> ConsoleData events (short messages). */
-        for (int i = 0; i < 32; ++i) {
-            size_t n = target_serial_read(0, console, sizeof(console));
-            if (!n)
-                break;
-            ph_console_data_emit(console, n);
-        }
+        ph_console_pump(); /* Work console bridge (Hello / framing / baud) */
 
         ph_terminal_worker();
         ph_bulk_worker();
