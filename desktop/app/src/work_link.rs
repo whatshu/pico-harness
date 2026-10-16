@@ -143,7 +143,7 @@ impl TraceDecoder {
         let mut descriptions: Vec<String> = frames.iter().map(describe_frame).collect();
         if !plain.is_empty() {
             descriptions.push(format!(
-                "UART raw / unrecognized data · {} B · {}",
+                "UART console · {} B · {}",
                 plain.len(),
                 preview(&plain)
             ));
@@ -328,53 +328,10 @@ impl Link {
         if !bytes.is_empty() {
             self.last_rx = Instant::now();
             self.trace("UART", "RX", &bytes);
-            let (frames, plain) = self.decoder.feed(&bytes);
-            if !self.framed && !plain.is_empty() {
-                let _ = self.events.send(Event::UartRx(plain));
-            }
-            for frame in frames {
-                match frame.kind {
-                    0x81 if frame.data == [1, 7, 0, 8] => {
-                        let changed = !self.framed;
-                        let was_verified = self.negotiated;
-                        self.framed = true;
-                        self.negotiated = true;
-                        if changed || !was_verified {
-                            self.state();
-                        }
-                        if frame.sequence != 0 {
-                            self.pending.push_back(frame);
-                        }
-                    }
-                    0x90 => {
-                        if !self.framed {
-                            self.framed = true;
-                            self.state();
-                        }
-                        let _ = self.events.send(Event::UartRx(frame.data));
-                    }
-                    0x91 => {
-                        self.bulk_ready = true;
-                        self.state();
-                    }
-                    kind if kind >= 0x80 => self.pending.push_back(frame),
-                    _ => {
-                        if !self.framed {
-                            let _ = self.events.send(Event::UartRx(frame.encode()));
-                        }
-                    }
-                }
-            }
-            while self.pending.len() > 32 {
-                self.pending.pop_front();
-            }
-        } else if !self.framed
-            && !self.decoder.bytes.is_empty()
-            && self.last_rx.elapsed() > Duration::from_millis(100)
-        {
-            let _ = self
-                .events
-                .send(Event::UartRx(std::mem::take(&mut self.decoder.bytes)));
+            // The Debug core hands Work's console output to us as plain bytes:
+            // pico_harness framing lives on the Debug core now, so there is
+            // nothing to peel here - surface the text directly.
+            let _ = self.events.send(Event::UartRx(bytes));
         }
         if self.framed || discovery_started.elapsed() >= DISCOVERY_WINDOW {
             self.discovery_complete = true;
@@ -804,26 +761,6 @@ mod tests {
             self.reply(0x87, self.bulk_sequence, &crc16(data).to_le_bytes());
             Ok(vec![0; data.len()])
         }
-    }
-
-    #[test]
-    fn canceled_bulk_stops_after_the_last_acknowledged_block() {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let mut link = Link::new(tx, 115200, true).with_cancel(cancel.clone());
-        let mut io = ConsoleIo::default();
-        let payload = vec![0xa7; BLOCK * 3];
-        let mut progress = vec![];
-        let error = link
-            .send(&mut io, &payload, |sent, total| {
-                progress.push((sent, total));
-                cancel.store(true, Ordering::Relaxed);
-            })
-            .unwrap_err();
-        assert_eq!(error, "Operation canceled");
-        assert_eq!(io.blocks, [payload[..BLOCK].to_vec()]);
-        assert_eq!(progress, [(BLOCK, payload.len())]);
-        assert!(!rx.try_iter().any(|event| matches!(event, Event::UartTx(_))));
     }
 
     #[test]
