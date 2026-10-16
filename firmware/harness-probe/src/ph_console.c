@@ -40,7 +40,8 @@ static uint16_t seq;
 #define BAUDS_COMMIT 3
 static uint8_t baud_state;
 static uint32_t baud_target, baud_previous;
-static uint64_t baud_t0; /* start of current transaction */
+static uint64_t baud_t0;        /* start of current transaction */
+static uint64_t baud_switch_at; /* wall-clock instant to switch rates */
 
 static uint8_t rx_frame[PH_CONSOLE_FRAME_MAX];
 static size_t rx_len;
@@ -153,12 +154,14 @@ static void handle_frame(uint8_t kind, uint16_t frame_seq, const uint8_t *payloa
             uint32_t echoed;
             memcpy(&echoed, payload, 4);
             if (echoed == baud_target) {
-                /* Work switches ~100ms after the prepare; match it, then
-                 * verify at the new rate. */
+                /* Work switches ~100ms after IT received the prepare; we must
+                 * switch after that. The 0x03->0x83 round trip costs ~1.2 ms
+                 * at 115200, so anchor on the ACK instant (not our send) and
+                 * add a small margin. */
+                baud_switch_at = time_us_64() + BAUD_SWITCH_DELAY_US + 5000u;
                 uint64_t now = time_us_64();
-                uint64_t switch_at = baud_t0 + BAUD_SWITCH_DELAY_US;
-                if (now < switch_at)
-                    busy_wait_until(switch_at);
+                if (now < baud_switch_at)
+                    busy_wait_until(baud_switch_at);
                 uint32_t actual;
                 target_serial_config(0, baud_target, 8, 1, 0, &actual);
                 current_baud = actual;
@@ -295,9 +298,11 @@ bool ph_console_baud(uint32_t baud, uint32_t *actual)
         }
         if (baud_state != BAUDS_IDLE)
             ph_console_baud_rollback();
-        /* Succeed only if the target rate was actually reached and committed.
-         * A rollback (Work restored its previous rate) is reported as failure. */
-        if (current_baud != baud_target)
+        /* Success = the applied rate landed within 2% of the request (UART
+         * dividers round, so e.g. 125000000/271 = 460829 for 460800). */
+        uint32_t err = current_baud > baud_target ? current_baud - baud_target
+                                                  : baud_target - current_baud;
+        if (err * 100u > baud_target * 2u)
             return false;
         *actual = current_baud;
         return true;
