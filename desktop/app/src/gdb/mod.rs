@@ -1,9 +1,8 @@
 pub mod mi;
 use mi::{quote, Value};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     io::{BufRead, BufReader, Write},
-    net::TcpListener,
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -287,94 +286,23 @@ fn reader<R: std::io::Read + Send + 'static>(input: R, tx: mpsc::SyncSender<Stri
         }
     });
 }
-fn start_openocd(config: &Config, events: &Sender<Event>) -> Result<(Process, String), String> {
-    if config.serial.is_empty() {
-        return Err("Select a probe serial number before starting OpenOCD".into());
+fn start_openocd(
+    config: &Config,
+    events: &Sender<Event>,
+) -> Result<(ph_app_link::debug::DebugServer, String), String> {
+    let mut server = ph_app_link::debug::DebugServer::start(ph_app_link::DebugConfig {
+        serial: config.serial.clone(),
+        target: config.target.clone(),
+        openocd: config.openocd.clone(),
+        scripts: config.scripts.clone(),
+    })
+    .map_err(|error| error.to_string())?;
+    let endpoint = server.endpoint.clone();
+    let (_, logs) = server.poll().map_err(|error| error.to_string())?;
+    for log in logs {
+        let _ = events.send(Event::OpenOcd(log));
     }
-    if !matches!(config.target.as_str(), "rp2040" | "rp2350") {
-        return Err("Unsupported target".into());
-    }
-    // Reserve a small consecutive range: target scripts may expose two GDB ports.
-    let mut allocation = None;
-    for base in (3333u16..10000).step_by(5) {
-        let sockets: Result<Vec<_>, _> = (base..base + 4)
-            .map(|p| TcpListener::bind(("127.0.0.1", p)))
-            .collect();
-        if let Ok(sockets) = sockets {
-            allocation = Some((base, sockets));
-            break;
-        }
-    }
-    let (port, sockets) = allocation.ok_or("No free local OpenOCD ports")?;
-    let mut cmd = Command::new(&config.openocd);
-    if !config.scripts.is_empty() {
-        cmd.args(["-s", &config.scripts]);
-    }
-    let serial = config
-        .serial
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "-_".contains(c));
-    if !serial {
-        return Err("Probe serial contains unsupported characters".into());
-    }
-    let interface = format!(
-        "adapter serial {}; adapter speed 1000; bindto 127.0.0.1; \
-         gdb_port {port}; tcl_port disabled; telnet_port disabled",
-        config.serial
-    );
-    let target = format!("target/{}.cfg", config.target);
-    cmd.args(["-f", "interface/cmsis-dap.cfg", "-c", &interface]);
-    if config.target == "rp2040" {
-        // The stock target script exposes isolated cores. Reset halt stops both,
-        // but GDB resumes only core0; a halted core1 freezes TIMER via DBGPAUSE.
-        cmd.args(["-c", "set USE_CORE 0"]);
-    }
-    cmd.args(["-f", &target, "-c", "init"]);
-    drop(sockets);
-    let mut process = Process(
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("OpenOCD: {e}"))?,
-    );
-    let (tx, rx) = mpsc::sync_channel(512);
-    reader(process.0.stdout.take().unwrap(), tx.clone());
-    reader(process.0.stderr.take().unwrap(), tx);
-    let until = Instant::now() + Duration::from_secs(10);
-    let needle = format!("Listening on port {port} for gdb");
-    let mut ready = false;
-    let mut recent = VecDeque::new();
-    while Instant::now() < until {
-        if let Ok(line) = rx.recv_timeout(Duration::from_millis(50)) {
-            ready |= line.contains(&needle);
-            let _ = events.send(Event::OpenOcd(line.clone()));
-            recent.push_back(line);
-            if recent.len() > 12 {
-                recent.pop_front();
-            }
-        }
-        if ready {
-            break;
-        }
-        if process.0.try_wait().map_err(|e| e.to_string())?.is_some() {
-            return Err(format!(
-                "OpenOCD exited. Check target configuration, power and probe access.\n{}",
-                recent.into_iter().collect::<Vec<_>>().join("\n")
-            ));
-        }
-    }
-    if !ready {
-        return Err("OpenOCD startup timed out; inspect OpenOCD Log".into());
-    }
-    let events = events.clone();
-    thread::spawn(move || {
-        while let Ok(line) = rx.recv() {
-            if events.send(Event::OpenOcd(line)).is_err() {
-                break;
-            }
-        }
-    });
-    Ok((process, format!("127.0.0.1:{port}")))
+    Ok((server, endpoint))
 }
 pub(crate) struct Lease(String);
 static LEASES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -414,12 +342,11 @@ fn run(config: Config, commands: Receiver<Request>, events: Sender<Event>) -> Re
                 }
                 _ => {}
             }
-            if server
-                .0
-                .try_wait()
-                .map_err(|error| error.to_string())?
-                .is_some()
-            {
+            let (exited, logs) = server.poll().map_err(|error| error.to_string())?;
+            for log in logs {
+                let _ = events.send(Event::OpenOcd(log));
+            }
+            if exited {
                 return Err("OpenOCD process exited".into());
             }
         }
@@ -551,7 +478,11 @@ fn run(config: Config, commands: Receiver<Request>, events: Sender<Event>) -> Re
             return Err("GDB process exited".into());
         }
         if let Some(ref mut p) = owned {
-            if p.0.try_wait().map_err(|e| e.to_string())?.is_some() {
+            let (exited, logs) = p.poll().map_err(|e| e.to_string())?;
+            for log in logs {
+                let _ = engine.events.send(Event::OpenOcd(log));
+            }
+            if exited {
                 return Err("OpenOCD process exited".into());
             }
         }

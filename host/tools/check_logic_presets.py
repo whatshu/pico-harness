@@ -8,31 +8,26 @@ python3 -m host.tools.check_logic_presets --serial SERIAL --output /tmp/logic.js
 
 import argparse
 import json
-import struct
 import time
 from pathlib import Path
 
-from host.pdbg.device import Probe
-from host.pdbg.protocol import Command
+from host.phbridge.ipc import Client
 
 SAMPLE_RATES = (100_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000)
 RUNNING, STALL, TIMEOUT, CANCELLED = 16, 2, 4, 8
 
 
 def start(probe, rate, edge, pin=5, timeout_ms=1000):
-    payload = struct.pack("<IIBBHBB", 32768, rate, edge, pin, timeout_ms, 0, 0)
-    reply = Probe._ok(probe.command(Command.CAPTURE_START, payload), "start capture")
-    return struct.unpack("<I", reply)[0]
+    return probe.call("capture.start", {"samples": 32768, "rate": rate, "edge": edge,
+                                       "pin": pin, "timeout_ms": timeout_ms})["id"]
 
 
 def poll(probe, capture_id):
     deadline = time.monotonic() + 3
     while True:
-        reply = Probe._ok(probe.command(Command.CAPTURE_POLL), "poll capture")
-        actual_id, rate, elapsed, flags, count = struct.unpack("<IIIII", reply)
-        assert actual_id == capture_id, "Capture was replaced"
-        if not flags & RUNNING:
-            return rate, elapsed, flags, count
+        reply = probe.call("capture.poll", {"id": capture_id})
+        if not reply["flags"] & RUNNING:
+            return reply["rate"], reply["elapsed_us"], reply["flags"], reply["count"]
         if time.monotonic() > deadline:
             raise TimeoutError("Capture did not complete within 3 seconds")
         time.sleep(0.002)
@@ -41,10 +36,9 @@ def poll(probe, capture_id):
 def read(probe, capture_id, count):
     words = []
     for offset in range(0, count, 1023):
-        length = min(1023, count - offset)
-        payload = struct.pack("<IIH", capture_id, offset, length)
-        reply = Probe._ok(probe.command(Command.CAPTURE_READ, payload), "read capture")
-        words.extend(struct.unpack(f"<{length}I", reply))
+        reply = probe.call("capture.read", {"id": capture_id, "offset": offset,
+                                           "length": min(1023, count - offset)})
+        words.extend(reply["words"])
     return words
 
 
@@ -76,8 +70,12 @@ def main():
     parser.add_argument("--serial", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    probe = Probe.open(args.serial)
+    probe = Client()
     try:
+        capabilities = probe.call("device.capabilities")
+        if not capabilities.get("logic_capture", False):
+            parser.exit(2, "phd reports logic_capture unsupported. Current PH firmware uses a separate SUMP CDC; run this fixture with a SUMP client.\n")
+        probe.call("device.open", {"serial": args.serial})
         results = []
         for rate in SAMPLE_RATES:
             for edge in (0, 1, 2):
@@ -93,7 +91,7 @@ def main():
         check_pwm(probe, 2_000_000, 1)
 
         capture_id = start(probe, 1_000_000, 1, pin=21, timeout_ms=2000)
-        Probe._ok(probe.command(Command.CAPTURE_CANCEL), "cancel capture")
+        probe.call("capture.cancel", {"id": capture_id})
         _, _, flags, _ = poll(probe, capture_id)
         assert flags & CANCELLED, f"Missing cancellation: {flags:#x}"
         check_pwm(probe, 2_000_000, 2)

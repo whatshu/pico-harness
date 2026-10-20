@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Derived from proto/ph.proto (nanopb). Typedef aliases so firmware code
+/* Derived from ph-bridge/proto/ph.proto (nanopb). Typedef aliases so firmware code
  * reads ph_* without the picoharness_v1_ qualification. */
 #include "ph.pb.h"
 

@@ -31,12 +31,16 @@ Work 烧录/调试使用 OpenOCD，Debug 升级使用 picotool。
 ```sh
 export PICO_SDK_PATH=/path/to/pico-sdk
 ./build.sh build
+cargo build --release --manifest-path ph-bridge/Cargo.toml --bins
+ph-bridge/target/release/phdcli daemon start
 cargo run --manifest-path desktop/Cargo.toml -p ph-app
 ```
 
 根构建脚本将 RP2040 Debug 固件放入 `RELEASE/artifacts/`。Pico 2 Debug 构建、
 连线、Work 示例和 CLI 使用见[入门](getting-started.md)，测试命令及设备要求见
 [测试说明](desktop-testing.md)。
+
+桌面端和 host 脚本统一通过 socket IPC 访问 `phd`。daemon 持有 USB 和烧录工具进程，提供本地/远程控制、独立 Console 游标和调试/烧录互斥。参见 [daemon 使用说明](../../ph-bridge/README.md) 和 [Claude/Codex MCP 配置](../../host/mcp/README.md)。
 
 ## 文档与源码
 
@@ -47,8 +51,8 @@ cargo run --manifest-path desktop/Cargo.toml -p ph-app
 | [desktop-testing.md](desktop-testing.md) | 离线、GUI、原生性能和硬件检查 |
 | [probe-upstream.md](probe-upstream.md) · [probe-logic-analyzer.md](probe-logic-analyzer.md) | 来源与许可说明 |
 
-源码按 `firmware/`（Debug、Work 库与夹具）、`host/`（Rust/Python 客户端）、
-`desktop/`（GUI 与 USB 适配层）、`proto/`（共享消息）、`pcb/`（载板）、
+源码按 `firmware/`（Debug、Work 库与夹具）、`host/`（Python 脚本与 MCP）、
+`desktop/`（GUI）、`ph-bridge/`（Rust daemon、CLI、IPC 客户端、硬件层与协议）、`pcb/`（载板）、
 `script/` 和 `third_party/` 组织。
 
 ## 许可

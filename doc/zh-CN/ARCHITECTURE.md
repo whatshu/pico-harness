@@ -9,11 +9,14 @@ PicoHarness 由 Debug 探针、Work 目标固件、主机连接库和桌面应�
 ## 1. 系统结构与代码入口
 
 ```text
-PC
-├─ OpenOCD / CMSIS-DAP 客户端 ── USB IF0 ── SWD ───────── Work
-├─ ph-bridge / phbridge ─────── USB IF1/2 ─ PH 控制消息 ┐
-├─ BulkWriter / ph bulk ─────── USB IF3 ─── 原始数据 ──┼─ Debug ─ UART/SPI ─ Work
-└─ SUMP 客户端（如 PulseView）── USB IF4/5 ─ PIO/DMA ──┘           GPIO 被动采样
+phdcli / Python / Desktop / Claude & Codex MCP
+                    │ authenticated TCP JSON-RPC (local or remote)
+                    ▼
+                   phd ── device ownership / events / tasks
+                    ├── CMSIS-DAP + OpenOCD ─ USB IF0 ─ SWD ─ Work
+                    ├── PH control ───────── USB IF1/2 ┐
+                    └── PH Bulk ──────────── USB IF3 ─┴─ Debug ─ UART/SPI ─ Work
+SUMP client ──────────────────────────────── USB IF4/5 ─ passive GPIO capture
 ```
 
 | 路径 | 职责 |
@@ -21,10 +24,12 @@ PC
 | [`firmware/harness-probe/`](../../firmware/harness-probe/) | Debug 固件：USB、CMSIS-DAP、PH 消息、Work 桥接、采样及电源管理 |
 | [`firmware/harness-target/`](../../firmware/harness-target/) | Work 端 `pico_harness` C 库及应用示例 |
 | [`firmware/test/`](../../firmware/test/) | 独立测试固件 |
-| [`proto/ph.proto`](../../proto/ph.proto) | PC ↔ Debug 的共享消息定义 |
-| [`host/ph-bridge/`](../../host/ph-bridge/) | Rust `ph_bridge` 库、Rust `ph` CLI、可选 PyO3 绑定 |
+| [`ph-bridge/proto/ph.proto`](../../ph-bridge/proto/ph.proto) | PC ↔ Debug 的共享消息定义 |
+| [`ph-bridge/bridge/`](../../ph-bridge/bridge/) | daemon 内部使用的 Rust PH/CDC/Bulk 硬件传输库 |
+| [`ph-bridge/phd/`](../../ph-bridge/phd/) · [`phdcli/`](../../ph-bridge/phdcli/) | 后台服务、设备互斥、事件游标、上传任务和控制程序 |
+| [`host/mcp/`](../../host/mcp/) | Rust MCP 服务与 Claude/Codex 适配 |
 | [`host/phbridge/`](../../host/phbridge/) | 独立 Python 客户端及 `python3 -m phbridge` CLI |
-| [`desktop/ph_app_link/`](../../desktop/ph_app_link/) | `PhBoardLink` 控制适配层与 `CmsisDap` SWD 客户端 |
+| [`ph-bridge/client/`](../../ph-bridge/client/) | 通过 socket 调用 phd 的 Rust `PhBoardLink` 与 `CmsisDap` 客户端 |
 | [`desktop/app/src/`](../../desktop/app/src/) | `ph-app`：egui 界面、后台会话、GDB、录制与解码 |
 | [`pcb/pico-dualcore-devboard-v1.2/`](../../pcb/pico-dualcore-devboard-v1.2/) | 可选双 Pico 载板 EasyEDA 工程 |
 | [`script/`](../../script/) · [`host/tools/`](../../host/tools/) | 构建辅助、OpenOCD/GDB 入口及检查工具 |
@@ -70,7 +75,7 @@ USB 重置或卸载会清理 PH、Console、Bulk 和 SUMP 会话状态。Debug �
 | IF3 | PH Terminal Bulk，Vendor `FF/50/01` | `05 / 86` | — |
 | IF4/5 | Pico Harness Logic Analyzer，CDC ACM / SUMP | `06 / 87` | `81` |
 
-表中端点地址均为十六进制。USB 为 Full Speed，数据端点最大包长 64 字节；Microsoft OS 2.0 WinUSB 描述符覆盖 IF0。
+表中端点地址均为十六进制。USB 为 Full Speed，数据端点最大包长 64 字节；Microsoft OS 2.0 WinUSB 描述符覆盖 IF0 和 IF3。
 
 ### 控制消息
 
@@ -109,7 +114,7 @@ IF3 载荷不加帧或 protobuf，事务长度和整体 CRC-32C 界定数据边�
 - `WORK_SPI=1`：要求已发现 Harness 模式。Debug 使用 4096 字节环形缓冲，将数据分成最多 2048 字节的 Work SPI 块；每块通过 UART prepare / CRC16 确认，最后校验整笔 CRC-32C。
 - **当前数据面仅支持 PC → Debug / Work。** `BulkRxAvail/Begin/Done` 已有 schema，固件没有处理读回，Vendor IN 不发送数据；Work 发出的 SPI 数据公告也不触发读回。
 
-实现见 [`ph_bulk.c`](../../firmware/harness-probe/src/ph_bulk.c)，主机写入见 [`bulk.rs`](../../host/ph-bridge/src/bulk.rs)。
+实现见 [`ph_bulk.c`](../../firmware/harness-probe/src/ph_bulk.c)，主机写入见 [`bulk.rs`](../../ph-bridge/bridge/src/bulk.rs)。
 
 ## 4. Debug ↔ Work：UART / SPI 协议
 
@@ -215,25 +220,30 @@ SUMP 流不传递引擎的实际速率、触发位置和错误标记；采样不
 
 ### 连接层
 
-Rust `ph_bridge` 的 `PhClient` 处理串行请求/响应和异步事件，`BulkWriter` 访问 IF3。prost 在构建时从 schema 生成类型；固件 nanopb 和 Python protobuf 生成文件随源码保存。Python `host/phbridge` 自行实现串口客户端；PyO3 的 `phbridge._native` 是可选扩展，CLI 不依赖它。
 
-Rust 设备发现读取 Linux sysfs，按序列号归并 PH Terminal 和 Logic CDC；macOS/Windows 的自动发现当前返回空列表。`script/pdbgctl.sh` 是 Python PH CLI 的封装，实际执行 `python3 -m phbridge`。
+`phd` 是设备访问的唯一服务入口。`ph-bridge/bridge` 实现 CDC/PH 和 Bulk，`device` 实现 CMSIS-DAP、OpenOCD 与 picotool。桌面端依赖 socket 客户端 `ph-client`（保留 `ph_app_link` 依赖别名）；Python 脚本保留在 `host/`，通过相同 IPC 调用。共享 schema 位于 `ph-bridge/proto/`，PyO3 直接植入方式已移除。
+
+本地与远程均使用带 token 和版本握手的 TCP JSON-RPC。daemon 串行处理同一设备的固件请求，为每个读取者提供独立事件游标；SWD、GDB、烧录共享互斥所有权。后台烧录任务在客户端断线后继续，可由其他客户端查询和取消；daemon 重启会改变 instance，使旧任务与游标失效。MCP 使用类型化工具、结构化错误和短时任务提交，提供 Claude/Codex 配置。
+
+Linux 通过 sysfs 和 serialport 元数据发现端口，macOS/Windows 通过 serialport 的 USB 接口号分类 PH Terminal 与 Logic CDC，避免向 SUMP 端口发送探测字节。libusb 管理 IF0/IF3；固件为 Windows 的这两个 vendor 接口声明 WinUSB，CDC 保持 usbser。原生后台服务分别使用 systemd user、LaunchAgent、Windows SCM。跨平台工作流会构建与测试各平台；真实 USB 与服务管理器仍需对应系统验证。
+
+连接配置、原生服务、token、远程 GDB 通道见 [daemon 文档](../../ph-bridge/README.md)，完整 socket 契约见 [IPC.md](../../ph-bridge/IPC.md)，Agent 配置见 [MCP 文档](../../host/mcp/README.md)。
 
 ### 桌面结构与功能边界
 
-`ph-app` 使用 eframe/egui。`model.rs` 保存设备和页面状态，`live.rs` 用后台线程和命令/事件通道执行设备访问，`telemetry.rs` 管理测量、历史和录制，`logic.rs` 负责采样数据解释，`gdb/` 负责 GDB/MI 与 OpenOCD 子进程。
+`ph-app` 使用 eframe/egui。`model.rs` 保存设备和页面状态，`live.rs` 用后台线程和命令/事件通道执行设备访问，`telemetry.rs` 管理测量、历史和录制，`logic.rs` 负责采样数据解释，`gdb/` 负责本地 GDB/MI 与 daemon 上的 OpenOCD 会话。
 
 | 组件 | 当前实现 |
 | --- | --- |
-| `PhBoardLink` | 通过 `ph_bridge` 提供身份、状态、电源、测量、复位、Debug BOOTSEL、短 Console 和波特率接口 |
-| CMSIS-DAP / SWD | 独立 USB 客户端，供暂停/恢复、寄存器、内存读写和导出使用 |
+| `PhBoardLink` | 通过 socket IPC 调用 `phd` 提供身份、状态、电源、测量、复位、Debug BOOTSEL、短 Console 和波特率接口 |
+| CMSIS-DAP / SWD | daemon 中的独占 SWD 会话，供暂停/恢复、寄存器、内存读写和导出使用 |
 | GDB | 管理 OpenOCD 和 GDB/MI，支持匹配 ELF、源码断点/步进及仅启动 GDB server；连接外部 server 时保留其配置 |
 | 固件上传 | Work UF2/ELF/BIN 校验后由 OpenOCD 烧录；Debug UF2 由 picotool 更新并校验重连 |
 | Console / Logic 界面 | 具备历史、trace、UART/SPI/I²C/PWM 本地解码及 CSV/VCD 导出代码；硬件调用受下述适配层限制 |
 
 **桌面适配层不提供原始 SPI 配置/传输、GPIO 快照和逻辑采集。** 对应方法直接返回接口迁移错误；`work_link.rs` 仍有 Work 帧及 SPI 调用，`live.rs` 仍调用采集方法，因此 GUI 的文件 Bulk 和 Logic 采样不能作为当前已接通的功能使用。PC → Work Bulk 使用 PH CLI / `BulkWriter`，逻辑采样使用独立 SUMP 客户端。
 
-GDB 托管会话期间桌面 Live 释放 USB。RP2040 托管 OpenOCD 只调试 core0；此前外部会话若留下 core1 暂停，需复位 Work。固件页拖入 ELF 表示烧录；GDB 页使用同次构建的 ELF 提供符号并附加。
+GDB 托管会话期间 daemon 协调设备所有权，桌面 Live 暂停冲突操作。RP2040 托管 OpenOCD 只调试 core0；此前外部会话若留下 core1 暂停，需复位 Work。固件页拖入 ELF 表示烧录；GDB 页使用同次构建的 ELF 提供符号并附加。
 
 桌面本地数据有界：测量历史最多 200,000 点，命令历史每设备 100 条，trace 最多 4000 条且原始/解码数据各限 2 MiB。Live 暂停仅冻结显示，测量和录制继续；JSONL 每条刷新，可离线加载。录制路径为 `$XDG_DATA_HOME/picoharness/recordings`（默认 `~/.local/share/picoharness/recordings`）或 `%LOCALAPPDATA%/picoharness/recordings`，可用 `PDBG_RECORDINGS` 覆盖。
 

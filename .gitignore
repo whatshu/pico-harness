@@ -28,6 +28,8 @@ __pycache__/
 # Local clangd analysis glue: firmware/harness-probe/build -> /BUILD/analysis/<board>
 firmware/harness-probe/build
 desktop/target/
+/ph-bridge/target/
+/host/mcp/target/
 
 # Local workspace configuration and all standalone firmware builds
 /.aws/

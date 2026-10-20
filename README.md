@@ -33,6 +33,8 @@ OpenOCD handles Work programming/debugging; picotool handles Debug updates.
 ```sh
 export PICO_SDK_PATH=/path/to/pico-sdk
 ./build.sh build
+cargo build --release --manifest-path ph-bridge/Cargo.toml --bins
+ph-bridge/target/release/phdcli daemon start
 cargo run --manifest-path desktop/Cargo.toml -p ph-app
 ```
 
@@ -40,6 +42,11 @@ The root build packages RP2040 Debug firmware in `RELEASE/artifacts/`.
 Pico 2 Debug builds, wiring, Work examples and CLI commands are covered in the
 [getting started guide](doc/getting-started.md). Test commands and hardware
 requirements are in [desktop-testing.md](doc/desktop-testing.md).
+
+The desktop and host scripts use `phd` socket IPC. The daemon owns USB and
+programmer processes. It supports local and remote control, independent Console
+history and exclusive debug/programming sessions. See the [daemon guide](ph-bridge/README.md)
+and [Claude/Codex MCP setup](host/mcp/README.md).
 
 ## Documentation and source
 
@@ -51,8 +58,8 @@ requirements are in [desktop-testing.md](doc/desktop-testing.md).
 | [probe-upstream.md](doc/probe-upstream.md) · [probe-logic-analyzer.md](doc/probe-logic-analyzer.md) | Source provenance and license attribution |
 
 Source is organized under `firmware/` (Debug, Work library and fixtures),
-`host/` (Rust/Python clients), `desktop/` (GUI and USB adapter), `proto/`
-(shared schema), `pcb/` (carrier), `script/` and `third_party/`.
+`ph-bridge/` (Rust daemon, CLI, socket client, hardware modules and schemas),
+`host/` (Python scripts and MCP), `desktop/` (GUI), `pcb/` (carrier), `script/` and `third_party/`.
 
 ## License
 

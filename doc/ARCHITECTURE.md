@@ -9,11 +9,14 @@ This document describes the current implementation and interface limits. See [ge
 ## 1. System structure and code entry points
 
 ```text
-PC
-├─ OpenOCD / CMSIS-DAP client ─ USB IF0 ─── SWD ───────── Work
-├─ ph-bridge / phbridge ─────── USB IF1/2 ─ PH messages ┐
-├─ BulkWriter / ph bulk ─────── USB IF3 ─── raw data ───┼─ Debug ─ UART/SPI ─ Work
-└─ SUMP client (e.g. PulseView) USB IF4/5 ─ PIO/DMA ────┘           passive GPIO capture
+phdcli / Python / Desktop / Claude & Codex MCP
+                    │ authenticated TCP JSON-RPC (local or remote)
+                    ▼
+                   phd ── device ownership / events / tasks
+                    ├── CMSIS-DAP + OpenOCD ─ USB IF0 ─ SWD ─ Work
+                    ├── PH control ───────── USB IF1/2 ┐
+                    └── PH Bulk ──────────── USB IF3 ─┴─ Debug ─ UART/SPI ─ Work
+SUMP client ──────────────────────────────── USB IF4/5 ─ passive GPIO capture
 ```
 
 | Path | Responsibility |
@@ -21,10 +24,12 @@ PC
 | [`firmware/harness-probe/`](../firmware/harness-probe/) | Debug firmware: USB, CMSIS-DAP, PH messages, Work bridging, capture and power management |
 | [`firmware/harness-target/`](../firmware/harness-target/) | Work `pico_harness` C library and application examples |
 | [`firmware/test/`](../firmware/test/) | Standalone test firmware |
-| [`proto/ph.proto`](../proto/ph.proto) | Shared PC ↔ Debug message definitions |
-| [`host/ph-bridge/`](../host/ph-bridge/) | Rust `ph_bridge` library, Rust `ph` CLI and optional PyO3 bindings |
-| [`host/phbridge/`](../host/phbridge/) | Independent Python client and `python3 -m phbridge` CLI |
-| [`desktop/ph_app_link/`](../desktop/ph_app_link/) | `PhBoardLink` control adapter and `CmsisDap` SWD client |
+| [`ph-bridge/proto/ph.proto`](../ph-bridge/proto/ph.proto) | Shared PC ↔ Debug message definitions |
+| [`ph-bridge/bridge/`](../ph-bridge/bridge/) | Daemon-internal Rust PH/CDC/Bulk hardware transport |
+| [`ph-bridge/phd/`](../ph-bridge/phd/) · [`phdcli/`](../ph-bridge/phdcli/) | Daemon, ownership, event cursors, uploads/tasks and control CLI |
+| [`host/mcp/`](../host/mcp/) | Rust MCP server and Claude/Codex adapters |
+| [`host/phbridge/`](../host/phbridge/) | Python IPC client and `python3 -m phbridge` compatibility CLI |
+| [`ph-bridge/client/`](../ph-bridge/client/) | Socket-backed `PhBoardLink` and `CmsisDap` client for phd |
 | [`desktop/app/src/`](../desktop/app/src/) | `ph-app`: egui UI, background sessions, GDB, recording and decoding |
 | [`pcb/pico-dualcore-devboard-v1.2/`](../pcb/pico-dualcore-devboard-v1.2/) | EasyEDA project for the optional dual-Pico carrier |
 | [`script/`](../script/) · [`host/tools/`](../host/tools/) | Build helpers, OpenOCD/GDB entry points and checks |
@@ -70,7 +75,7 @@ The device VID/PID is `2e8a:000c`; the serial number comes from the Flash unique
 | IF3 | PH Terminal Bulk, Vendor `FF/50/01` | `05 / 86` | — |
 | IF4/5 | Pico Harness Logic Analyzer, CDC ACM / SUMP | `06 / 87` | `81` |
 
-Endpoint addresses above are hexadecimal. USB runs at Full Speed with 64-byte maximum data packets. The Microsoft OS 2.0 WinUSB descriptor covers IF0.
+Endpoint addresses above are hexadecimal. USB runs at Full Speed with 64-byte maximum data packets. The Microsoft OS 2.0 WinUSB descriptor covers IF0 and IF3.
 
 ### Control messages
 
@@ -109,7 +114,7 @@ IF3 payloads contain no framing or protobuf. The transaction length and overall 
 - `WORK_SPI=1` requires Harness mode to have been discovered. Debug uses a 4096-byte ring and splits data into Work SPI blocks of at most 2048 bytes. Each block uses UART prepare / CRC16 confirmation, followed by an overall CRC-32C check.
 - **The data plane currently supports only PC → Debug / Work.** `BulkRxAvail/Begin/Done` exist in the schema, but firmware does not handle readback and Vendor IN sends no data. Work SPI data announcements do not initiate readback either.
 
-See [`ph_bulk.c`](../firmware/harness-probe/src/ph_bulk.c) and the host writer in [`bulk.rs`](../host/ph-bridge/src/bulk.rs).
+See [`ph_bulk.c`](../firmware/harness-probe/src/ph_bulk.c) and the host writer in [`bulk.rs`](../ph-bridge/bridge/src/bulk.rs).
 
 ## 4. Debug ↔ Work: UART / SPI protocol
 
@@ -215,25 +220,30 @@ The SUMP stream omits actual rate, trigger position and error flags. Short captu
 
 ### Connection layer
 
-Rust `ph_bridge::PhClient` handles sequential requests/responses and asynchronous events; `BulkWriter` accesses IF3. prost generates Rust types from the schema during builds. Generated firmware nanopb and Python protobuf files are checked in. Python `host/phbridge` implements its own serial client; the PyO3 `phbridge._native` extension is optional and not required by the CLI.
 
-Rust discovery reads Linux sysfs and groups PH Terminal and Logic CDC ports by serial number. Automatic discovery on macOS/Windows currently returns an empty list. `script/pdbgctl.sh` wraps the Python PH CLI and executes `python3 -m phbridge`.
+`phd` is the service entry point for device access. `ph-bridge/bridge` implements CDC/PH and Bulk; `device` owns CMSIS-DAP, OpenOCD and picotool. The desktop depends on the socket-only `ph-client` crate through the retained `ph_app_link` dependency alias. Python scripts remain in `host/` and use the same IPC. The shared schema lives under `ph-bridge/proto/`; direct PyO3 embedding has been removed.
+
+Local and remote clients use token-authenticated, versioned TCP JSON-RPC. The daemon serializes firmware requests per board and retains independent event cursors. SWD, GDB and programming share exclusive ownership. Background programming tasks survive client disconnects and support status/cancellation from another client; a daemon restart changes instance and invalidates old task IDs/cursors. MCP provides typed tools, structured errors, prompt task submission and Claude/Codex configuration.
+
+Linux discovery uses sysfs plus serialport metadata; macOS/Windows use serialport USB interface numbers to distinguish PH Terminal from Logic CDC without sending probe bytes to SUMP. libusb handles IF0/IF3; firmware advertises WinUSB for both vendor interfaces on Windows and leaves CDC with usbser. Native services use systemd user, LaunchAgent and Windows SCM respectively. CI builds/tests each OS; physical USB and native service managers require checks on their actual platform.
+
+See the [daemon guide](../ph-bridge/README.md) for lifecycle, credentials and remote GDB tunneling, [IPC.md](../ph-bridge/IPC.md) for the socket contract, and [MCP setup](../host/mcp/README.md) for agents.
 
 ### Desktop structure and feature limits
 
-`ph-app` uses eframe/egui. `model.rs` holds device/page state; `live.rs` performs device operations on a background thread through command/event channels. `telemetry.rs` manages measurements, history and recording; `logic.rs` interprets capture data; `gdb/` manages GDB/MI and OpenOCD subprocesses.
+`ph-app` uses eframe/egui. `model.rs` holds device/page state; `live.rs` performs device operations on a background thread through command/event channels. `telemetry.rs` manages measurements, history and recording; `logic.rs` interprets capture data; `gdb/` manages local GDB/MI and daemon-backed OpenOCD sessions.
 
 | Component | Current implementation |
 | --- | --- |
-| `PhBoardLink` | Identity, status, power, measurement, reset, Debug BOOTSEL, short Console and baud interfaces through `ph_bridge` |
-| CMSIS-DAP / SWD | Separate USB client for halt/resume, registers, memory reads/writes and export |
-| GDB | Managed OpenOCD and GDB/MI, matching ELF, source breakpoints/stepping and server-only mode; external servers retain their configuration |
+| `PhBoardLink` | Identity, status, power, measurement, reset, Debug BOOTSEL, short Console and baud interfaces through socket IPC to `phd` |
+| CMSIS-DAP / SWD | Exclusive daemon SWD session for halt/resume, registers, memory reads/writes and export |
+| GDB | Daemon-managed OpenOCD, authenticated GDB tunnel and local GDB/MI, matching ELF, source breakpoints/stepping and server-only mode; external servers retain their configuration |
 | Firmware upload | Work UF2/ELF/BIN validation and OpenOCD programming; Debug UF2 updates through picotool with reconnection checks |
 | Console / Logic UI | History, trace, local UART/SPI/I²C/PWM decoders and CSV/VCD export code; hardware calls are subject to the adapter limits below |
 
 **The desktop adapter rejects raw SPI configuration/transfers, GPIO snapshots and logic acquisition.** These methods return interface-migration errors. `work_link.rs` still contains Work framing and SPI calls, and `live.rs` still calls capture methods, so GUI file Bulk and Logic acquisition are not connected features. Use the PH CLI / `BulkWriter` for PC → Work Bulk and a separate SUMP client for capture.
 
-Desktop Live releases USB during managed GDB sessions. Managed RP2040 OpenOCD debugs core0 only; reset Work if a previous external session left core1 halted. Dropping an ELF on the Firmware page means programming; the GDB page uses symbols from the same build to attach.
+The daemon arbitrates device ownership during managed GDB sessions; the desktop pauses its competing Live operations. Managed RP2040 OpenOCD debugs core0 only; reset Work if a previous external session left core1 halted. Dropping an ELF on the Firmware page means programming; the GDB page uses symbols from the same build to attach.
 
 Desktop data is bounded: measurement history has at most 200,000 samples, command history has 100 entries per device, and trace has at most 4000 records with separate 2 MiB raw/decoded limits. Live pause freezes display only; measurement and recording continue. Each JSONL sample is flushed and recordings can be loaded offline. Recordings live in `$XDG_DATA_HOME/picoharness/recordings` (default `~/.local/share/picoharness/recordings`) or `%LOCALAPPDATA%/picoharness/recordings`, overridden by `PDBG_RECORDINGS`.
 

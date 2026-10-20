@@ -841,6 +841,7 @@ mod tests {
             bus: 1,
             address: 2,
             product: "PDBG Probe".into(),
+            terminal: None,
             access_error: None,
         }
     }

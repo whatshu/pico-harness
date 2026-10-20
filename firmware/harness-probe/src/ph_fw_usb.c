@@ -46,7 +46,8 @@
 
 #define PH_FW_CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN + \
                           TUD_VENDOR_DESC_LEN + TUD_CDC_DESC_LEN)
-#define PH_FW_MS_OS_20_DESC_LEN 0xB2
+#define PH_FW_MS_OS_20_FUNCTION_LEN (0x08 + 0x14 + 0x84)
+#define PH_FW_MS_OS_20_DESC_LEN (0x0A + 0x08 + 2 * PH_FW_MS_OS_20_FUNCTION_LEN)
 #define PH_FW_BOS_TOTAL_LEN (TUD_BOS_DESC_LEN + TUD_BOS_MICROSOFT_OS_DESC_LEN)
 
 #define DAP_INTERFACE_SUBCLASS 0x00
@@ -210,14 +211,14 @@ uint8_t const desc_ms_os_20[] = {
 
     /* Function Subset header: length, type, first interface, reserved, subset length */
     U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), ITF_DAP, 0,
-    U16_TO_U8S_LE(PH_FW_MS_OS_20_DESC_LEN - 0x0A - 0x08),
+    U16_TO_U8S_LE(PH_FW_MS_OS_20_FUNCTION_LEN),
 
     /* MS OS 2.0 Compatible ID descriptor: length, type, compatible ID, sub compatible ID */
     U16_TO_U8S_LE(0x0014), U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID), 'W', 'I', 'N', 'U', 'S',
     'B', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* sub-compatible */
 
     /* MS OS 2.0 Registry property descriptor: length, type */
-    U16_TO_U8S_LE(PH_FW_MS_OS_20_DESC_LEN - 0x0A - 0x08 - 0x08 - 0x14),
+    U16_TO_U8S_LE(0x84),
     U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY), U16_TO_U8S_LE(0x0007),
     /* wPropertyDataType, wPropertyNameLength and the property name
      * string "DeviceInterfaceGUIDs", all encoded as UTF-16. */
@@ -228,6 +229,31 @@ uint8_t const desc_ms_os_20[] = {
     /* bPropertyData "{CDB3B5AD-293B-4663-AA36-1AAE46463776}" as a UTF-16
      * string (b doesn't mean bytes) */
     '{', 0x00, 'C', 0x00, 'D', 0x00, 'B', 0x00, '3', 0x00, 'B', 0x00, '5', 0x00, 'A', 0x00, 'D',
+    0x00, '-', 0x00, '2', 0x00, '9', 0x00, '3', 0x00, 'B', 0x00, '-', 0x00, '4', 0x00, '6', 0x00,
+    '6', 0x00, '3', 0x00, '-', 0x00, 'A', 0x00, 'A', 0x00, '3', 0x00, '6', 0x00, '-', 0x00, '1',
+    0x00, 'A', 0x00, 'A', 0x00, 'E', 0x00, '4', 0x00, '6', 0x00, '4', 0x00, '6', 0x00, '3', 0x00,
+    '7', 0x00, '7', 0x00, '6', 0x00, '}', 0x00, 0x00, 0x00, 0x00, 0x00,
+
+    /* Bind only the vendor Bulk interface to WinUSB as well. CDC interfaces
+     * continue to use usbser; phd can claim IF3 without replacing their driver.
+     * Each WinUSB function publishes its own DeviceInterfaceGUIDs property. */
+    U16_TO_U8S_LE(0x0008), U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), ITF_BULK, 0,
+    U16_TO_U8S_LE(PH_FW_MS_OS_20_FUNCTION_LEN),
+    U16_TO_U8S_LE(0x0014), U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID),
+    'W', 'I', 'N', 'U', 'S', 'B', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+
+    /* MS OS 2.0 Registry property descriptor: length, type */
+    U16_TO_U8S_LE(0x84),
+    U16_TO_U8S_LE(MS_OS_20_FEATURE_REG_PROPERTY), U16_TO_U8S_LE(0x0007),
+    /* wPropertyDataType, wPropertyNameLength and the property name
+     * string "DeviceInterfaceGUIDs", all encoded as UTF-16. */
+    U16_TO_U8S_LE(0x002A), 'D', 0x00, 'e', 0x00, 'v', 0x00, 'i', 0x00, 'c', 0x00, 'e', 0x00, 'I',
+    0x00, 'n', 0x00, 't', 0x00, 'e', 0x00, 'r', 0x00, 'f', 0x00, 'a', 0x00, 'c', 0x00, 'e', 0x00,
+    'G', 0x00, 'U', 0x00, 'I', 0x00, 'D', 0x00, 's', 0x00, 0x00, 0x00,
+    U16_TO_U8S_LE(0x0050), /* wPropertyDataLength */
+    /* bPropertyData "{DDB3B5AD-293B-4663-AA36-1AAE46463776}" as a UTF-16
+     * string (b doesn't mean bytes) */
+    '{', 0x00, 'D', 0x00, 'D', 0x00, 'B', 0x00, '3', 0x00, 'B', 0x00, '5', 0x00, 'A', 0x00, 'D',
     0x00, '-', 0x00, '2', 0x00, '9', 0x00, '3', 0x00, 'B', 0x00, '-', 0x00, '4', 0x00, '6', 0x00,
     '6', 0x00, '3', 0x00, '-', 0x00, 'A', 0x00, 'A', 0x00, '3', 0x00, '6', 0x00, '-', 0x00, '1',
     0x00, 'A', 0x00, 'A', 0x00, 'E', 0x00, '4', 0x00, '6', 0x00, '4', 0x00, '6', 0x00, '3', 0x00,

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "picoharness": {
+      "type": "stdio",
+      "command": "ph-mcp",
+      "args": [],
+      "env": { "PHD_ADDR": "127.0.0.1:44840" }
+    }
+  }
+}

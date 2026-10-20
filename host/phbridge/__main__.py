@@ -1,26 +1,16 @@
 """`ph` — PicoHarness command line (python, uses host/phbridge).
 
 `python3 -m phbridge ...` — the bring-up and scripting interface that supersedes
-the retired `host/pdbg` package. The Rust `ph` bin uses the same PH protocol.
+the retired `host/pdbg` package. All device access runs on the phd host through socket IPC.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
-import phbridge
-import phbridge.ph_pb2 as pb
 from phbridge.client import PhClient, scan_terminals
-
-
-def crc32c(data: bytes) -> int:
-    crc = 0xFFFFFFFF
-    for b in data:
-        crc ^= b
-        for _ in range(8):
-            crc = (crc >> 1) ^ (0x82F63B78 & -(crc & 1))
-    return (~crc) & 0xFFFFFFFF
 
 
 def open_client(port: str | None, require: bool = True) -> PhClient:
@@ -64,25 +54,13 @@ def cmd_console_send(c: PhClient, args):
 
 
 def cmd_console_read(c: PhClient, _):
-    import time
-
-    deadline = time.time() + 1.0
-    printed = 0
-    while time.time() < deadline and printed < 64:
-        events = c.drain_events()
-        for ev in events:
-            if ev.WhichOneof("body") == "console_data":
-                sys.stdout.write(ev.console_data.data.decode("utf-8", "replace"))
-                sys.stdout.flush()
-                printed += 1
-        if printed == 0 and not c.s.in_waiting:
-            # pull a short read window for unsolicited output
-            ev = c.wait_event("console_data", timeout=0.2)
-            if ev is not None:
-                sys.stdout.write(ev.console_data.data.decode("utf-8", "replace"))
-                sys.stdout.flush()
-                printed += 1
-    if printed == 0:
+    # Independent readers can inspect output retained before this process opened.
+    c.cursor = 0
+    event = c.wait_event("console_data", timeout=1.0)
+    if event is not None:
+        sys.stdout.write(event.console_data.data.decode("utf-8", "replace"))
+        sys.stdout.flush()
+    else:
         print("(no console output)")
 
 
@@ -95,63 +73,28 @@ def cmd_term(c: PhClient, args):
 
 
 def cmd_bulk(c: PhClient, args):
-    import usb.core
-    import usb.util
-
-    payload = open(args.file, "rb").read()
-    crc = crc32c(payload)
-    r = c.bulk_tx_begin(route=1, length=len(payload), crc=crc)  # WORK_SPI
-    if r is None or r.status != 0:
-        sys.exit(f"bulk begin failed: status={getattr(r, 'status', 'no reply')}")
-
-    dev = usb.core.find(idVendor=0x2E8A, idProduct=0x000C)
-    if dev is None:
-        sys.exit("probe not found over USB")
-    itf = None
-    for i in dev.get_active_configuration():
-        if i.bInterfaceNumber == 3:
-            itf = i
-    usb.util.claim_interface(dev, 3)
-    try:
-        out = usb.util.find_descriptor(
-            itf,
-            custom_match=lambda e: usb.util.endpoint_direction(e.bEndpointAddress)
-            == usb.util.ENDPOINT_OUT,
-        )
-        out.write(payload, timeout=10000)
-        done = c.wait_event("bulk_tx_done", timeout=8.0)
-        if done is None:
-            sys.exit("no BulkTxDone within 8s")
-        print(
-            f"bulk done: ok={done.bulk_tx_done.ok} "
-            f"crc_recv=0x{done.bulk_tx_done.crc_recv:08x} expected=0x{crc:08x}"
-        )
-        if not done.bulk_tx_done.ok:
-            sys.exit(1)
-    finally:
-        usb.util.release_interface(dev, 3)
+    from pathlib import Path
+    result = c.bulk_write(Path(args.file).read_bytes())
+    print(f"bulk done: ok={result['ok']} bytes={result['bytes']} crc=0x{result['crc32c']:08x}")
 
 
 def cmd_flash(c: PhClient, args):
-    import shutil
-    import subprocess
     import time
-
-    picotool = __import__("os").environ.get("PICOTOOL") or shutil.which("picotool")
-    if not picotool:
-        sys.exit("picotool not found")
-    r = c.debug_bootsel()
-    if r is None or r.status != 0:
-        sys.exit("debug_bootsel failed")
-    time.sleep(2)
-    rc = subprocess.run([picotool, "load", "-x", args.uf2])
-    if rc.returncode != 0:
-        sys.exit(f"picotool load failed ({rc.returncode})")
+    upload = c.ipc.upload(args.uf2)
+    task = c.ipc.call("task.start", {"kind": "debug_flash", "upload": upload, "serial": c.serial, "picotool": os.environ.get("PICOTOOL", "picotool")})["id"]
+    while True:
+        status = c.ipc.call("task.status", {"id": task})
+        if status["state"] != "running":
+            if status["state"] != "succeeded":
+                sys.exit(status.get("error") or status["state"])
+            print("Debug firmware updated")
+            return
+        time.sleep(0.1)
 
 
 def main() -> None:
     p = argparse.ArgumentParser(prog="ph")
-    p.add_argument("-p", "--port", default=None, metavar="TTY", help="PH Terminal tty (auto)")
+    p.add_argument("-p", "--port", default=None, metavar="TTY", help="probe serial or port on the phd host (auto if unambiguous)")
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("device", help="list devices").add_argument("list", nargs="?", default="list")
@@ -175,7 +118,7 @@ def main() -> None:
 
     if args.command == "device":
         port = scan_terminals()
-        print(f"PH Terminal: {port or '(none)'}")
+        print(f"Probe: {port or '(none)'}")
         return
 
     c = open_client(args.port)

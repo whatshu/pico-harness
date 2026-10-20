@@ -8,15 +8,6 @@ only) so `./build.sh test` can exercise the protocol offline.
 
 from __future__ import annotations
 
-import os
-import sys
-
-# The generated `ph_pb2.py` does a bare `import nanopb_pb2`; the sibling module
-# must be importable even when only the parent dir is on sys.path.
-_here = os.path.dirname(os.path.abspath(__file__))
-if _here not in sys.path:
-    sys.path.insert(0, _here)
-
 
 def varint_encode(value: int) -> bytes:
     assert value >= 0

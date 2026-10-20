@@ -1,0 +1,13 @@
+[package]
+name = "ph-device"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+rusb = "0.9.4"
+thiserror = "2.0"
+ph-bridge = { path = "../bridge" }
+ph-protocol = { path = "../protocol" }
+serde = { version = "1", features = ["derive"] }
+ph-image = { path = "../image" }

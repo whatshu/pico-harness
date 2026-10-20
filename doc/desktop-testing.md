@@ -11,7 +11,10 @@ Run from the repository root. The respective commands require Python dependencie
 ```sh
 PYTHONPATH=host python3 -m unittest discover -s host/tests -p test_ph_proto.py
 python3 firmware/harness-target/test/run.py
-cargo test --manifest-path host/ph-bridge/Cargo.toml --lib
+cargo build --manifest-path ph-bridge/Cargo.toml --bins
+PYTHONPATH=host python3 -m unittest discover -s host/tests
+cargo test --manifest-path ph-bridge/Cargo.toml --workspace
+cargo test --manifest-path host/mcp/Cargo.toml
 cargo test --manifest-path desktop/Cargo.toml --workspace
 python3 -m unittest discover -s desktop/tests -v
 python3 host/tools/check_pinmap.py
@@ -19,7 +22,9 @@ python3 host/tools/check_pinmap.py
 
 These cover PH encoding/decoding, production Work code against UART/clock/PWM stubs, the Rust connection layer, desktop logic and performance calculations. Work library regressions need neither the Pico SDK nor hardware.
 
-`./build.sh test --offline` also builds Work self-test artifacts and requires the Pico SDK and ARM toolchain. The script still discovers and runs device tests under `host/tests`; `--offline` / `--hardware` currently do not change device discovery. Use the individual commands above for fully offline checks.
+`./build.sh test --offline` runs the host/MCP checks and builds Work self-test artifacts, so it also requires the Pico SDK and ARM toolchain. Python hardware tests run only with `PHD_HARDWARE_TEST=1` and an explicit `PHD_SERIAL`; the script's `--hardware` option enables that mode. Socket integration tests use real loopback listeners, and daemon tests also use Unix pseudo-terminals. They require local socket permissions but no USB devices.
+
+The host suite covers fragmented frames, authentication/version rejection, independent subscribers, event gaps, device leases, upload bounds, background task cancellation after client disconnect, GDB binary tunneling, CLI/Python interoperability and daemon restart. MCP tests use the official client and real stdio subprocess. [Native CI](../.github/workflows/host.yml) builds/tests Linux, macOS and Windows; hardware/service checks remain platform-specific.
 
 ## GUI automation
 
@@ -59,14 +64,44 @@ CPU 100% means one logical core; steady-state results exclude warmup. RSS/PSS ex
 
 ## Hardware checks
 
-`host/tests/test_ph_device.py` automatically finds a device and operates its power and control channels. Close other programs using the serial port before running it. The desktop connection layer has explicitly ignored integration tests:
+Start `phd` on the machine holding the probe, then select its serial explicitly. The Python fixture changes Work power and restores its initial state; it does not program firmware.
 
 ```sh
-cargo test --manifest-path desktop/Cargo.toml -p ph_app_link --test live \
+PHD_HARDWARE_TEST=1 PHD_SERIAL=YOUR_SERIAL PYTHONPATH=host \
+  python3 -m unittest discover -s host/tests -p test_ph_device.py -v
+```
+
+For repeatable bridge latency and integrity checks, use the release daemon and
+save the report under `BUILD/`:
+
+```sh
+PYTHONPATH=host python3 host/tools/check_bridge.py --serial YOUR_SERIAL \
+  --output BUILD/bridge-hardware/run.json --soak-seconds 60
+```
+
+This exercises sequential/concurrent control requests, CRC-checked Debug Bulk
+payloads at USB packet boundaries, mixed load and connection churn. The soak
+uses eight control clients and one 4 KiB Bulk sender by default. Reported call
+latencies include socket and physical-device round trips.
+
+Add `--swd-rp2040` for read-only Work memory checks, block/scalar comparisons
+across MEM-AP page boundaries, target FAULT recovery and exclusive-lease cleanup.
+With `harness-terminal` already installed on Work, `--console-terminal
+--console-iterations 300` compares complete replies at two independent
+subscribers and reports whether a third slow subscriber lost retained history.
+`--console-echo` instead requires a dedicated byte-echo fixture. These Work
+options temporarily enable its rail and restore its initial power state. They
+do not program firmware. See the [Linux hardware validation record](bridge-hardware-validation.md)
+for measured results and the tested recovery scope.
+
+Set `PHD_ADDR` / `PHD_TOKEN_FILE` to test a remote daemon. Desktop hardware checks use the same socket client. Daemon-internal ignored tests live in `ph-bridge/device`; run them only while other device users and phd are stopped:
+
+```sh
+cargo test --manifest-path ph-bridge/Cargo.toml -p ph-device --test live \
   -- --ignored --nocapture
 ```
 
-These check PH identity, power, measurements and explicit rejection of interfaces that moved off the control link. They switch Work power on and off.
+These low-level fixtures can toggle Work power and are intended for transport development.
 
 With matching `harness-signals` firmware already on Work and its ELF available, check a managed GDB session:
 
@@ -77,4 +112,4 @@ cargo run --manifest-path desktop/Cargo.toml -p ph-app --bin gdb_smoke -- \
 
 This mode uses the existing Flash firmware, resetting, halting and resuming Work without downloading new firmware. Other Flash / Debug update tests are gated by `PDBG_FLASH_TEST_IMAGE`, `PDBG_FLASH_TARGET`, `PDBG_DEBUG_IMAGE` and `PDBG_PROBE_SERIAL`; enabling them programs the selected core.
 
-Ignored tests in `live.rs` / `work_link.rs` that require raw SPI or capture methods, and `host/tools/check_logic_presets.py`, depend on currently rejected or absent interfaces. They are not usable hardware acceptance entry points.
+Ignored tests in `live.rs` / `work_link.rs` that require raw SPI or capture methods, and `host/tools/check_logic_presets.py`, depend on currently rejected or absent interfaces. The preset script checks daemon capabilities and exits explicitly when logic capture is unsupported. They are not usable hardware acceptance entry points.

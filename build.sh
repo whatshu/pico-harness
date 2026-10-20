@@ -71,8 +71,11 @@ build_work_selftest() {
 }
 
 run_tests() {
+  cargo build --manifest-path "$root_dir/ph-bridge/Cargo.toml" --bins || return
   PYTHONPATH="$root_dir/host" python3 -m unittest discover -s "$root_dir/host/tests" -p 'test_*.py' || return
-  cargo test --manifest-path "$root_dir/host/ph-bridge/Cargo.toml" --lib || return
+  cargo test --manifest-path "$root_dir/ph-bridge/Cargo.toml" --workspace || return
+  cargo test --manifest-path "$root_dir/host/mcp/Cargo.toml" || return
+  cargo test --manifest-path "$root_dir/desktop/Cargo.toml" --workspace || return
   bash -n "$root_dir/build.sh" || return
   for wrapper in "$root_dir"/script/*.sh; do bash -n "$wrapper" || return; done
   python3 "$root_dir/host/tools/check_pinmap.py"
@@ -80,6 +83,12 @@ run_tests() {
 
 run_test_suite() {
   local hardware_mode="${1:-auto}" test_dir="$release_dir/test"
+  if [[ "$hardware_mode" == required ]]; then
+    export PHD_HARDWARE_TEST=1
+    : "${PHD_SERIAL:?set PHD_SERIAL for the hardware fixture}"
+  else
+    export PHD_HARDWARE_TEST=0
+  fi
   run_tests || return
   build_work_selftest || return
   mkdir -p "$test_dir"
@@ -95,17 +104,15 @@ run_test_suite() {
 
 flash_debug() {
   require_command python3 || return
-  require_command "${PICOTOOL:-picotool}" || return
   local uf2
-  uf2="$(ls "$build_dir"/pico_dualcore_debug_*.uf2 2>/dev/null | head -1)"
+  uf2="$(ls "$build_dir"/harness-probe-pico/pico_dualcore_debug_*.uf2 2>/dev/null | head -1)"
   [[ -n "$uf2" ]] || uf2="$(ls "$release_dir"/artifacts/pico_dualcore_debug_*.uf2 2>/dev/null | head -1)"
   [[ -n "$uf2" ]] || { echo "no debug UF2 built ($build_dir/pico_dualcore_debug_*.uf2)"; return 1; }
   PICOTOOL="${PICOTOOL:-picotool}" PYTHONPATH="$root_dir/host" python3 -m phbridge flash "$uf2"
 }
 
 monitor_debug() {
-  echo "monitor: retired with the PDBG wire protocol; use the WORK console"
-  echo "over the PH Terminal instead: ph console read"
+  PYTHONPATH="$root_dir/host" python3 -m phbridge console read
 }
 
 run_ci() {

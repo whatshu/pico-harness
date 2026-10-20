@@ -631,7 +631,7 @@ impl Device {
             match event {
                 Event::Phase(phase) => {
                     if self.flash.status != "Cancelling" {
-                        self.flash.status = phase.into();
+                        self.flash.status = phase.clone();
                     }
                     self.event(now, &format!("Firmware: {phase}"));
                 }

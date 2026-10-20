@@ -1,0 +1,15 @@
+[package]
+name = "ph-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ph-protocol = { path = "../protocol" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+base64.workspace = true
+directories = "6"
+
+ph-image = { path = "../image" }

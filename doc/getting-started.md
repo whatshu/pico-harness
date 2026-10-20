@@ -11,6 +11,8 @@ Install the official Pico SDK 2.x, ARM GCC, CMake, Ninja and Rust. On Linux, gra
 ```sh
 export PICO_SDK_PATH=/path/to/pico-sdk
 ./build.sh build
+cargo build --release --manifest-path ph-bridge/Cargo.toml --bins
+ph-bridge/target/release/phdcli daemon start
 cargo run --manifest-path desktop/Cargo.toml -p ph-app
 ```
 
@@ -26,16 +28,17 @@ cmake --build BUILD/harness-probe-pico2
 
 ## 2. Connect and control the board
 
-Debug exposes CMSIS-DAP, PH Terminal, PH Terminal Bulk and Logic Analyzer interfaces. PH Terminal carries binary messages; access it through the CLI or a client library. The Python CLI requires `pyserial` and `protobuf`; Bulk also requires `pyusb`.
+Debug exposes CMSIS-DAP, PH Terminal, PH Terminal Bulk and Logic Analyzer interfaces. `phd` owns device access; Python scripts and the desktop connect through TCP IPC. Add `ph-bridge/target/release` to PATH (use `.exe` on Windows). Python compatibility commands need only protobuf, with dependencies in `host/requirements.txt`.
 
 ```sh
-PYTHONPATH=host python3 -m phbridge device list
-PYTHONPATH=host python3 -m phbridge -p /dev/ttyACM0 power on
-PYTHONPATH=host python3 -m phbridge -p /dev/ttyACM0 status
-PYTHONPATH=host python3 -m phbridge -p /dev/ttyACM0 measure
+phdcli device list
+phdcli --serial SERIAL power on
+phdcli --serial SERIAL status
+phdcli --serial SERIAL measure
+PYTHONPATH=host python3 -m phbridge -p SERIAL status
 ```
 
-Replace the tty with the actual PH Terminal port. Work starts powered off; enable power before accessing it. With multiple probes, choose the control port explicitly. The Bulk CLI selects its USB data device automatically, so connect only one probe when using Bulk or CLI firmware updates.
+Use the discovered serial. Work starts powered off. Multiple probes are selected by serial consistently across control, Bulk, SWD and updates. `PHD_ADDR` and `PHD_TOKEN_FILE` select a remote daemon using the same clients. Native service installation, platform permissions, remote transport and GDB tunneling are documented in the [daemon guide](../ph-bridge/README.md); [MCP setup](../host/mcp/README.md) covers Claude and Codex.
 
 ## 3. Build and program a Work example
 
@@ -59,13 +62,13 @@ For a Pico 2 Work board, use `PICO_BOARD=pico2` and a fresh build directory. Ope
 ## 4. Use Console, Bulk and logic capture
 
 ```sh
-PYTHONPATH=host python3 -m phbridge -p /dev/ttyACM0 console send 'help'
-PYTHONPATH=host python3 -m phbridge -p /dev/ttyACM0 console read
-PYTHONPATH=host python3 -m phbridge -p /dev/ttyACM0 term 460800
-PYTHONPATH=host python3 -m phbridge -p /dev/ttyACM0 bulk /path/to/payload.bin
+PYTHONPATH=host python3 -m phbridge -p SERIAL console send 'help'
+PYTHONPATH=host python3 -m phbridge -p SERIAL console read
+PYTHONPATH=host python3 -m phbridge -p SERIAL term 460800
+PYTHONPATH=host python3 -m phbridge -p SERIAL bulk /path/to/payload.bin
 ```
 
-Short messages contain at most 128 bytes. Sending and reading are separate CLI operations; the sending process may already consume output, so interactive applications should keep one client connection open. Harness firmware announces its protocol when idle; wait for discovery before sending Bulk. Debug splits large files into SPI blocks of at most 2048 bytes. USB Bulk supports writes only, so large-file echo cannot verify readback. With plain UART firmware, configure Work to match any baud change yourself.
+Short messages contain at most 128 bytes. The daemon retains Console events for independent readers; keep the returned cursor and instance, and handle `gap` as explicit history loss. Harness firmware announces its protocol when idle; wait for discovery before sending Bulk. Debug splits large files into SPI blocks of at most 2048 bytes. USB Bulk supports writes only, so large-file echo cannot verify readback. With plain UART firmware, configure Work to match any baud change yourself.
 
 Use the separate Logic Analyzer CDC with a SUMP client, such as PulseView's `ols` driver; channel mapping is in the architecture document. With `harness-signals` running, observe GP5 at 10 kHz / 35% duty, UART on GP12/13 and SPI on GP18–21 during transfers. The buffer holds 32,768 samples, giving at most 16.384 ms at 2 MHz. SUMP implements a subset of the protocol; see the architecture document for limits on error and actual-rate reporting.
 
@@ -73,7 +76,7 @@ The desktop Logic capture and file Bulk paths are not connected to the dedicated
 
 ## 5. Use GDB or your own application
 
-Program Work from the desktop Firmware page, then import the Debug ELF from the **same build** on the GDB page. The app starts OpenOCD and attaches for breakpoints, Continue, Pause and stepping. **GDB server only** allows an external IDE to connect at the endpoint shown on the page. Live releases USB during a managed session.
+Program Work from the desktop Firmware page, then import the Debug ELF from the **same build** on the GDB page. The daemon starts OpenOCD; the app creates an authenticated socket tunnel and attaches for breakpoints, Continue, Pause and stepping. **GDB server only** allows an external IDE to connect at the endpoint shown on the page. The daemon arbitrates exclusive device ownership during a managed session.
 
 To add the Console library to your application, place this after `pico_sdk_init()`:
 

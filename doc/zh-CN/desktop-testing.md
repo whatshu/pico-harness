@@ -11,7 +11,10 @@
 ```sh
 PYTHONPATH=host python3 -m unittest discover -s host/tests -p test_ph_proto.py
 python3 firmware/harness-target/test/run.py
-cargo test --manifest-path host/ph-bridge/Cargo.toml --lib
+cargo build --manifest-path ph-bridge/Cargo.toml --bins
+PYTHONPATH=host python3 -m unittest discover -s host/tests
+cargo test --manifest-path ph-bridge/Cargo.toml --workspace
+cargo test --manifest-path host/mcp/Cargo.toml
 cargo test --manifest-path desktop/Cargo.toml --workspace
 python3 -m unittest discover -s desktop/tests -v
 python3 host/tools/check_pinmap.py
@@ -19,7 +22,9 @@ python3 host/tools/check_pinmap.py
 
 这些检查覆盖 PH 编解码、Work 生产代码的 UART/时钟/PWM 桩回归、Rust 连接层、桌面逻辑和性能统计计算。Work 库回归无需 Pico SDK 或设备。
 
-`./build.sh test --offline` 还会构建 Work 自检产物，需要 Pico SDK 和 ARM 工具链。该脚本当前仍发现并运行 `host/tests` 中的设备测试；`--offline` / `--hardware` 没有改变设备探测行为。需要完全离线时使用上面的独立命令。
+`./build.sh test --offline` 运行 host/MCP 测试并生成 Work 自检固件，因此需要 Pico SDK 和 ARM 工具链。Python 硬件测试仅在 `PHD_HARDWARE_TEST=1` 且显式指定 `PHD_SERIAL` 时执行；脚本的 `--hardware` 会启用这一模式。socket 集成测试使用真实 loopback 监听，daemon 测试还使用 Unix 伪终端，需要允许本地 socket，但不需要 USB 设备。
+
+覆盖范围包括帧分片、认证/版本拒绝、独立订阅者、事件丢失、设备互斥、上传边界、客户端断开后的后台任务取消、GDB 二进制通道、CLI/Python 互操作及 daemon 重启。MCP 测试使用官方客户端和真实 stdio 子进程。[跨平台 CI](../../.github/workflows/host.yml) 构建并测试 Linux/macOS/Windows；真实硬件和原生服务需在对应系统验证。
 
 ## GUI 自动化
 
@@ -59,16 +64,38 @@ python3 desktop/tools/ui_perf.py --binary desktop/target/release/ph-app \
 
 ## 硬件检查
 
-`host/tests/test_ph_device.py` 自动寻找设备，会操作电源及控制通道；运行前关闭其他占用串口的程序。桌面连接层有显式忽略的集成测试：
+先在连接探针的机器启动 `phd`，再显式选择序列号。Python 夹具会改变 Work 电源并恢复初始状态，不烧录固件：
 
 ```sh
-cargo test --manifest-path desktop/Cargo.toml -p ph_app_link --test live \
+PHD_HARDWARE_TEST=1 PHD_SERIAL=YOUR_SERIAL PYTHONPATH=host \
+  python3 -m unittest discover -s host/tests -p test_ph_device.py -v
+```
+
+使用 release daemon，运行可重复的 bridge 延迟、完整性和持续负载检查：
+
+```sh
+PYTHONPATH=host python3 host/tools/check_bridge.py --serial YOUR_SERIAL \
+  --output BUILD/bridge-hardware/run.json --soak-seconds 60
+```
+
+默认覆盖顺序/并发控制请求、USB 包边界上的 Debug Bulk CRC、混合负载和反复连接。
+持续负载默认使用 8 个控制客户端和 1 个 4 KiB Bulk 发送者；延迟包含 socket 和实体设备往返。
+
+增加 `--swd-rp2040` 可验证 Work 内存只读访问、跨 MEM-AP 页边界的块/单字比对、
+目标 FAULT 恢复和独占资源释放。Work 已运行 `harness-terminal` 时，使用
+`--console-terminal --console-iterations 300` 比对两个独立订阅者的完整响应，并报告
+第三个慢订阅者是否丢失保留历史。`--console-echo` 则需要专用的字节回显夹具。
+这些 Work 选项会临时上电并恢复初始电源状态，不烧录固件。
+实际结果和恢复测试范围见 [Linux 实体硬件记录](bridge-hardware-validation.md)。
+
+设置 `PHD_ADDR` / `PHD_TOKEN_FILE` 可验证远程 daemon。桌面硬件测试同样使用 IPC。daemon 内部硬件夹具位于 `ph-bridge/device`；仅在停止 phd 和其他设备使用者后运行：
+
+```sh
+cargo test --manifest-path ph-bridge/Cargo.toml -p ph-device --test live \
   -- --ignored --nocapture
 ```
 
-该组检查 PH 身份、电源、测量和已迁移接口的明确拒绝行为，会开关 Work 电源。
-
-已有匹配 `harness-signals` ELF 和 Work 固件时，可验证托管 GDB 会话：
+这些底层夹具会切换 Work 电源，用于传输层开发。Work 已运行匹配的 `harness-signals` 固件且有对应 ELF 时，可验证托管 GDB：
 
 ```sh
 cargo run --manifest-path desktop/Cargo.toml -p ph-app --bin gdb_smoke -- \
