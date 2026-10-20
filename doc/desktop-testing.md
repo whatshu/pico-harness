@@ -1,163 +1,80 @@
-# Desktop testing
+**English** · [简体中文](zh-CN/desktop-testing.md)
 
-The desktop is validated by three complementary kinds of checks: explicit
-hardware tests (see the [desktop guide](desktop.md)), the native-window UI
-performance tests below, and the egui_kittest automated GUI tests below.
+# Build and test
 
-## UI performance tests
+This page lists reusable validation entry points. See [ARCHITECTURE.md](ARCHITECTURE.md) for hardware interfaces and limits; the presence of test code does not establish that a hardware path is connected.
 
-The opt-in `ui-perf` build opens the actual native desktop window and renders the
-normal pages. The Python runner measures that process through Linux `/proc`; it
-needs Python 3 and a working X11/Wayland session, with no extra Python packages.
-The normal desktop build contains no performance fixtures.
+## Offline checks
+
+Run from the repository root. The respective commands require Python dependencies, a host C compiler and Rust dependencies.
 
 ```sh
-cargo build --manifest-path desktop/Cargo.toml -p picoharness-desktop \
-  --release --features ui-perf
-python3 desktop/tools/ui_perf.py --output BUILD/ui-perf/run-1 --repeat 2
+PYTHONPATH=host python3 -m unittest discover -s host/tests -p test_ph_proto.py
+python3 firmware/harness-target/test/run.py
+cargo test --manifest-path host/ph-bridge/Cargo.toml --lib
+cargo test --manifest-path desktop/Cargo.toml --workspace
+python3 -m unittest discover -s desktop/tests -v
+python3 host/tools/check_pinmap.py
 ```
 
-Use a new output directory for each run. Each scenario starts a fresh process at
-1360 × 940 logical points, with separate window preferences and recordings.
-Warmup defaults to 3 s, observation to 10 s, and process sampling to 250 ms.
-Keep the windows visible, avoid interaction, and avoid concurrent builds or
-other heavy work. Renderer, scaling, CPU and binary hash are recorded.
+These cover PH encoding/decoding, production Work code against UART/clock/PWM stubs, the Rust connection layer, desktop logic and performance calculations. Work library regressions need neither the Pico SDK nor hardware.
 
-The default suite covers idle, Live, paused recording, ordinary/flood/hex Console,
-raw SPI trace, the 200,000-sample history limit, ordinary/dense logic captures,
-cached running registers, memory inspection, cached GDB source and idle firmware
-upload. Synthetic cases feed the existing event consumer and bounded buffers;
-they perform no USB enumeration, hardware commands or programming.
+`./build.sh test --offline` also builds Work self-test artifacts and requires the Pico SDK and ARM toolchain. The script still discovers and runs device tests under `host/tests`; `--offline` / `--hardware` currently do not change device discovery. Use the individual commands above for fully offline checks.
 
-The selected probe can also supply actual Live measurements. This case performs
-discovery and normal Live communication, without flashing either Core:
+## GUI automation
 
 ```sh
-python3 desktop/tools/ui_perf.py --output BUILD/ui-perf/connected \
-  --scenario connected-live --probe-serial YOUR_SERIAL
+cargo test --manifest-path desktop/Cargo.toml -p ph-app --bin ph-app gui_tests
 ```
 
-Run sustained pressure or enforce budgets explicitly:
+[`gui_tests.rs`](../desktop/app/src/gui_tests.rs) uses egui_kittest / AccessKit to construct the real App and drive its controls. Only the USB session's command/event channels are replaced. No display server, device connection or programming is required.
+
+Coverage includes page navigation, Console focus and history, baud submission state, Live pause, Logic parameters and English/Chinese layouts. Controls have stable accessibility names: icons use helpers such as `theme::icon_button`, and inputs use `theme::accessible_label`. Tests use semantic interactions and command assertions, advancing a bounded number of frames after each action rather than waiting for the app to stop repainting.
+
+## Native-window performance
+
+Requires Linux `/proc`, Python 3 and a working X11/Wayland graphical session. Build with the `ui-perf` feature and specify the actual binary:
 
 ```sh
-python3 desktop/tools/ui_perf.py --output BUILD/ui-perf/soak \
-  --scenario console-flood --scenario trace-bulk --warmup 5 --duration 60
-python3 desktop/tools/ui_perf.py --output BUILD/ui-perf/budget \
-  --scenario console-hex --scenario logic-dense \
+cargo build --manifest-path desktop/Cargo.toml -p ph-app --release --features ui-perf
+python3 desktop/tools/ui_perf.py --binary desktop/target/release/ph-app \
+  --output BUILD/ui-perf/run-1 --repeat 2
+```
+
+Each scenario starts a separate process. Defaults are a 1360 × 940 window, 3 s warmup, 10 s observation and 250 ms process sampling. Use a new output directory each time, keep windows visible and avoid interaction or concurrent heavy workloads.
+
+Scenarios cover Live, paused recording, ordinary/flood/HEX Console, SPI trace, 200,000-sample history, dense Logic, cached registers, memory, GDB source and the firmware page. Defaults use bounded synthetic data without USB discovery or programming; `connected-live` uses a real device.
+
+```sh
+python3 desktop/tools/ui_perf.py --binary desktop/target/release/ph-app \
+  --output BUILD/ui-perf/connected --scenario connected-live --probe-serial YOUR_SERIAL
+python3 desktop/tools/ui_perf.py --binary desktop/target/release/ph-app \
+  --output BUILD/ui-perf/budget --scenario console-hex --scenario logic-dense \
   --max-update 50 --max-render 50 --max-rss 350
 ```
 
-Budgets depend on the machine and renderer; the runner exits nonzero on any
-failed budget, invalid/incomplete fixture, buffer overflow or timeout. Repeat
-runs on the same machine before treating a small change as a regression.
+Outputs include `summary.md/json`, per-scenario `ui.json`, process `process.csv/log` and recording fixtures. Failed budgets, invalid fixtures, buffer overflows or timeouts produce a nonzero exit status.
 
-- `summary.md` and `summary.json`: workloads, environment, results and failures.
-- Each scenario's `ui.json`: update/CPU-side render/frame interval percentiles,
-  frame rate, fixture setup time, actual viewport scale and buffer sizes.
-- `process.csv`: raw CPU time and RSS/PSS samples, including startup and warmup.
-- `process.log`, recording and history fixtures: local diagnostic artifacts.
+CPU 100% means one logical core; steady-state results exclude warmup. RSS/PSS exclude GPU memory and the compositor. Update time includes data injection and ingestion; CPU-side render time excludes vsync waits, while frame intervals include repaint waits. Synthetic traffic measures UI load. Logic scenarios display one capture and do not measure continuous hardware acquisition or SPI/UART throughput. Compare small differences with repeated runs on the same machine and renderer.
 
-CPU percentages sum all application threads: **100% means one logical CPU**.
-Steady CPU is time weighted and excludes warmup. RSS includes shared resident
-mappings; PSS apportions them. GPU VRAM, compositor and unrelated processes are
-excluded. CPU peaks depend on the sampling interval. A short-run RSS slope can
-reflect allocator/font/driver caches and does not prove or disprove a leak.
+## Hardware checks
 
-UI update timing includes synthetic event generation and normal ingestion.
-Eframe's previous-frame CPU-side timing also includes rendering, excluding vsync
-waiting; frame interval includes repaint waits and is not a 60 FPS promise.
-History setup time includes generating and loading its JSONL fixture. Logic
-cases display one decoded capture; they do not measure repeated hardware
-acquisition or decoding. Synthetic payload rates describe UI load, not physical
-UART/SPI throughput.
+`host/tests/test_ph_device.py` automatically finds a device and operates its power and control channels. Close other programs using the serial port before running it. The desktop connection layer has explicitly ignored integration tests:
 
 ```sh
-python3 -m unittest discover -s desktop/tests -v
-cargo test --manifest-path desktop/Cargo.toml --workspace --features ui-perf
+cargo test --manifest-path desktop/Cargo.toml -p ph_app_link --test live \
+  -- --ignored --nocapture
 ```
 
-Measurement tests cover CPU units, unequal intervals, warmup exclusion,
-insufficient samples, fixture validation and buffer bounds. Rust checks cover
-performance arguments and percentiles, multi-line Console alignment/history,
-and pixel-bounded logic geometry that preserves single-sample pulses and exact
-transitions at sample zoom. Capture data, decoders and exports keep full precision.
+These check PH identity, power, measurements and explicit rejection of interfaces that moved off the control link. They switch Work power on and off.
 
-Performance and UI regression results were collected and validated during
-development; the criteria below are enforced by the automated checks in
-`desktop/tests/`.
-
-## GUI automated testing
-
-PicoHarness tests the UI with
-[egui_kittest](https://github.com/emilk/egui/tree/0.31.1/crates/egui_kittest),
-the test companion for egui 0.31.1, together with
-[kittest](https://github.com/rerun-io/kittest). Tests construct a real `App`,
-run `eframe::App::update`, and find and drive the UI through the AccessKit
-accessibility tree. No display server, screenshot matching, screen
-coordinates or OS-level keyboard/mouse input is involved.
+With matching `harness-signals` firmware already on Work and its ELF available, check a managed GDB session:
 
 ```sh
-# GUI tests only; also works on headless Linux
-cargo test --manifest-path desktop/Cargo.toml \
-  -p picoharness-desktop --bin picoharness-desktop gui_tests
-
-# All default tests
-cargo test --manifest-path desktop/Cargo.toml --workspace
+cargo run --manifest-path desktop/Cargo.toml -p ph-app --bin gdb_smoke -- \
+  --flash-fixture BUILD/harness-signals/harness_signals.elf YOUR_PROBE_SERIAL
 ```
 
-The test driver is [desktop/app/src/gui_tests.rs](desktop/app/src/gui_tests.rs). `Gui::new`
-replaces only the USB session's command and event channels; pages, layout,
-focus, event consumption and the commands sent are all production code. The
-simulated device is compiled in only for tests: it never appears in the normal
-UI and never opens USB or flashes firmware.
+This mode uses the existing Flash firmware, resetting, halting and resuming Work without downloading new firmware. Other Flash / Debug update tests are gated by `PDBG_FLASH_TEST_IMAGE`, `PDBG_FLASH_TARGET`, `PDBG_DEBUG_IMAGE` and `PDBG_PROBE_SERIAL`; enabling them programs the selected core.
 
-Covered today:
-
-- Six-page shortcuts, tab clicks, and navigation that wraps around the ends.
-- Console auto-focus, Enter submitting `hi\n`, up/down history with draft
-  restore; the search field keeps focus and the input refocuses when returning
-  from the history viewer.
-- Baud presets, the Apply command, the button disabling while awaiting
-  confirmation, and the state after confirmation.
-- Overview pause, sustained measurements, and resuming at the latest readings.
-- GPn rename, rising/falling-edge icons, virtual decoder channels, and window
-  scaling.
-- Logic Run / Stop submitting the actual capture duration, sample rate, trigger
-  pin and timeout.
-- Button heights, same-row alignment, spacing, and window edges across
-  English/Chinese, 960 × 700 / 1360 × 940, and expanded/collapsed sidebars.
-  Geometry assertions read the accessibility tree; they do not compare
-  screenshots.
-
-### Adding tests
-
-Controls need stable, descriptive accessibility names. Text buttons carry
-their own names; icons register a name and tooltip via `theme::icon_button` /
-`icon_toggle` / `icon_menu`, and text inputs annotate themselves with
-`theme::accessible_label`. Renaming a GPn channel does not change its widget
-identity.
-
-```rust
-let mut gui = Gui::new(Page::Console, [960., 700.], 0);
-gui.app.get_by_label("Console input").type_text("hi");
-gui.settle();
-gui.app.press_key(egui::Key::Enter);
-gui.settle();
-assert!(matches!(
-    gui.commands.try_recv().unwrap(),
-    live::Command::DataSend(bytes) if bytes == b"hi\n"
-));
-```
-
-`click()`, `focus()` and `type_text()` are semantic control actions; shortcuts
-use the harness's egui event injection. Call `settle()` after each interaction
-to advance three frames. The app keeps requesting repaints, so a loop that
-waits for full idleness will hang. Don't let a test degrade into calling a
-business method and checking a field, or into clicking by the screen position
-of displayed text.
-
-GUI tests verify interactions and command boundaries. Real UART / SPI / PIO
-timing is covered by the [explicit hardware tests in the desktop
-guide](desktop.md); CPU, memory and render time by the [native-window tests
-above](#ui-performance-tests). The three kinds of checks complement each
-other.
+Ignored tests in `live.rs` / `work_link.rs` that require raw SPI or capture methods, and `host/tools/check_logic_presets.py`, depend on currently rejected or absent interfaces. They are not usable hardware acceptance entry points.

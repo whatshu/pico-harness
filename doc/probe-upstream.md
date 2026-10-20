@@ -1,10 +1,14 @@
-# Upstream provenance
+**English** · [简体中文](zh-CN/probe-upstream.md)
 
-- Repository: https://github.com/raspberrypi/debugprobe
-- Tag: `debugprobe-v2.3.1`
-- Commit: `39e3c8d15ba36cd607a276d7dfe23bde03e88be0`
-- Imported: 2026-07-21
-- License: MIT, retained in `firmware/harness-probe/LICENSE`
+# Debug probe provenance
 
-The source was imported from `git archive` so local board support and protocol changes are tracked in this repository. The original `freertos` gitlink is replaced by the pinned top-level `third_party/FreeRTOS-Kernel` dependency.
+| Item | Source |
+| --- | --- |
+| Upstream | [raspberrypi/debugprobe](https://github.com/raspberrypi/debugprobe) |
+| Tag | `debugprobe-v2.3.1` |
+| Commit | `39e3c8d15ba36cd607a276d7dfe23bde03e88be0` |
+| Original license | MIT, retained in [`firmware/harness-probe/LICENSE`](../firmware/harness-probe/LICENSE) |
 
+Debug firmware is maintained as imported source. This repository implements the board definitions, USB PH interfaces and Work bridge. FreeRTOS uses the top-level `third_party/FreeRTOS-Kernel` dependency.
+
+For the combined firmware containing the derived sampler, see [sampler provenance](probe-logic-analyzer.md) and [third-party notices](../THIRD_PARTY_NOTICES.md).
