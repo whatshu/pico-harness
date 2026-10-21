@@ -147,6 +147,13 @@ typedef uint32_t TickType_t;
 #define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
 TickType_t xTaskGetTickCount(void);
 bool tud_ready(void);
+uint32_t tud_vendor_read(void *buffer, uint32_t count);
+uint32_t tud_cdc_n_available(uint8_t port);
+uint32_t tud_cdc_n_read(uint8_t port, void *buffer, uint32_t count);
+uint32_t tud_cdc_n_write_available(uint8_t port);
+uint32_t tud_cdc_n_write(uint8_t port, const void *buffer, uint32_t count);
+uint32_t tud_cdc_n_write_flush(uint8_t port);
+bool tud_cdc_n_connected(uint8_t port);
 static inline void __dmb(void)
 {
 }

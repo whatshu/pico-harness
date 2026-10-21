@@ -10,6 +10,7 @@ Run from the repository root. The respective commands require Python dependencie
 
 ```sh
 PYTHONPATH=host python3 -m unittest discover -s host/tests -p test_ph_proto.py
+PYTHONPATH=host python3 -m unittest discover -s host/tests -p test_probe_transport.py
 python3 firmware/harness-target/test/run.py
 cargo build --manifest-path ph-bridge/Cargo.toml --bins
 PYTHONPATH=host python3 -m unittest discover -s host/tests
@@ -93,6 +94,12 @@ subscribers and reports whether a third slow subscriber lost retained history.
 options temporarily enable its rail and restore its initial power state. They
 do not program firmware. See the [Linux hardware validation record](bridge-hardware-validation.md)
 for measured results and the tested recovery scope.
+
+For Debug firmware comparisons, stop `phd` and use the dedicated raw USB
+[core benchmark](../host/tools/check_probe_core.py). It records individual
+latencies and CRC results, optionally measures Work SPI/control interference
+and SUMP capture readout, and restores Work power. Reproduction commands and
+fixture limitations are in [firmware performance validation](probe-core-performance.md).
 
 Set `PHD_ADDR` / `PHD_TOKEN_FILE` to test a remote daemon. Desktop hardware checks use the same socket client. Daemon-internal ignored tests live in `ph-bridge/device`; run them only while other device users and phd are stopped:
 

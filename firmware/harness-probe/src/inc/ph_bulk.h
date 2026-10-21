@@ -44,7 +44,8 @@ bool ph_bulk_busy(void);
  * terminal channel and release the data plane. */
 void ph_bulk_done(bool ok, uint32_t crc);
 
-/* any core on USB reset/unmount: drop state. */
+/* core0 on USB reset/unmount: request cancellation. The worker owns cleanup;
+ * USB pumping and new transactions stay blocked until it acknowledges. */
 void ph_bulk_reset(void);
 
 #endif

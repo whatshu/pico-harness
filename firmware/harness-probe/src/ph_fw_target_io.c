@@ -118,6 +118,8 @@ static bool io_ready;
 static bool target_ina_ready;
 static uint16_t work_millivolts;
 static int spi_rx_dma, spi_tx_dma;
+static bool spi_active;
+static uint32_t spi_started_us;
 
 /* ============================================================================
  * System-status LED
@@ -671,8 +673,10 @@ uint16_t ph_fw_target_work_mv(void)
     return work_millivolts;
 }
 
-bool ph_fw_target_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length, ph_fw_target_yield_fn yield)
+bool ph_fw_target_spi_start(const uint8_t *tx, uint8_t *rx, uint16_t length)
 {
+    if (spi_active || !length || !ph_fw_target_io_ready())
+        return false;
     gpio_put(PH_FW_SPI_CS_PIN, false);
     while (spi_is_readable(PH_FW_SPI_INTERFACE))
         (void)spi_get_hw(PH_FW_SPI_INTERFACE)->dr;
@@ -693,20 +697,35 @@ bool ph_fw_target_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length, 
     dma_channel_configure(spi_tx_dma, &dc, &spi_get_hw(PH_FW_SPI_INTERFACE)->dr, tx, length, false);
     dma_start_channel_mask((1u << spi_rx_dma) | (1u << spi_tx_dma));
 
-    uint32_t start = time_us_32();
-    bool failed = false;
-    while (dma_channel_is_busy(spi_rx_dma) || dma_channel_is_busy(spi_tx_dma) ||
-           spi_is_busy(PH_FW_SPI_INTERFACE)) {
-        if (yield() || time_us_32() - start > 5000000 || !ph_fw_target_io_ready()) {
-            failed = true;
-            break;
-        }
-    }
+    spi_started_us = time_us_32();
+    spi_active = true;
+    return true;
+}
 
+void ph_fw_target_spi_cancel(void)
+{
+    if (!spi_active)
+        return;
     dma_channel_abort(spi_rx_dma);
     dma_channel_abort(spi_tx_dma);
     gpio_put(PH_FW_SPI_CS_PIN, true);
-    return !failed;
+    spi_active = false;
+}
+
+int ph_fw_target_spi_poll(void)
+{
+    if (!spi_active)
+        return -1;
+    if (time_us_32() - spi_started_us > 5000000u || !ph_fw_target_io_ready()) {
+        ph_fw_target_spi_cancel();
+        return -1;
+    }
+    if (dma_channel_is_busy(spi_rx_dma) || dma_channel_is_busy(spi_tx_dma) ||
+        spi_is_busy(PH_FW_SPI_INTERFACE))
+        return 0;
+    __dmb();
+    ph_fw_target_spi_cancel();
+    return 1;
 }
 
 void ph_fw_target_io_init(void)

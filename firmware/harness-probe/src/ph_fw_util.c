@@ -20,12 +20,16 @@ uint16_t ph_fw_crc16_ccitt(const uint8_t *data, size_t length)
     return crc;
 }
 
-uint32_t ph_fw_crc32c(const uint8_t *data, size_t length)
+uint32_t ph_fw_crc32c_update(uint32_t crc, const uint8_t *data, size_t length)
 {
-    uint32_t crc = ~0u;
     while (length--)
         crc = (crc >> 8) ^ crc32c_table[(crc ^ *data++) & 0xff];
-    return ~crc;
+    return crc;
+}
+
+uint32_t ph_fw_crc32c(const uint8_t *data, size_t length)
+{
+    return ~ph_fw_crc32c_update(~0u, data, length);
 }
 
 /* Remap raw GPIO samples to the protocol's logical channel bit layout. The

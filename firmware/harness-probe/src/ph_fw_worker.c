@@ -73,7 +73,6 @@ void ph_fw_worker_thread(void)
         ph_terminal_worker();
         ph_bulk_worker();
         ph_sump_worker();
-        ph_fw_la_poll();
         tight_loop_contents();
     }
 }

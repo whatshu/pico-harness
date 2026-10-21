@@ -7,6 +7,7 @@ static struct mock_io regs;
 struct mock_io *io_bank0_hw = &regs;
 unsigned levels[30], directions[30], overrides[30], pulls[30];
 unsigned adc_value, adc_channel, now_us, ina_failure, power_read_bytes, off_was_hiz;
+unsigned mock_dma_busy, mock_spi_busy, mock_dma_aborts;
 uint32_t ina_registers[64];
 static uint8_t selected_register;
 static mock_spi_hw spi_regs;
@@ -30,6 +31,7 @@ void mock_reset(void)
     ina_registers[0x3e] = 0x5449;
     levels[1] = levels[2] = 1;
     adc_value = now_us = ina_failure = power_read_bytes = off_was_hiz = 0;
+    mock_dma_busy = mock_spi_busy = mock_dma_aborts = 0;
     next_dma_channel = 0;
     next_lock = 0;
     mock_clocks[clk_sys] = mock_clocks[clk_peri] = 125000000;
@@ -157,7 +159,7 @@ bool spi_is_readable(int port)
 bool spi_is_busy(int port)
 {
     assert(port == spi1);
-    return false;
+    return mock_spi_busy != 0;
 }
 mock_spi_hw *spi_get_hw(int port)
 {
@@ -224,12 +226,12 @@ void dma_start_channel_mask(uint32_t mask)
 }
 bool dma_channel_is_busy(int channel)
 {
-    (void)channel;
-    return false;
+    return (mock_dma_busy & (1u << channel)) != 0;
 }
 void dma_channel_abort(int channel)
 {
-    (void)channel;
+    mock_dma_aborts |= 1u << channel;
+    mock_dma_busy &= ~(1u << channel);
 }
 void channel_config_set_ring(dma_channel_config *config, bool ring, uint size_bits)
 {

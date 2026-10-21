@@ -62,6 +62,8 @@ Logic capture covers Work GP5, GP10–21 and GP26–28: 16 channels. The GP25 on
 
 USB reset or unmount clears PH, Console, Bulk and SUMP session state. For probe updates, `DebugBootsel` requests entry into ROM BOOTSEL after the response has been sent.
 
+SPI DMA runs across worker iterations through start/poll/cancel; Core 1 retains the block buffers until completion or cancellation. Bulk reset requests are acknowledged by Core 1 before USB pumping or a new transaction resumes. SUMP owns the capture-completion poll and Core 0 queues at most 64 sample bytes per pump, flushing only the final short packet. See the [firmware performance validation](probe-core-performance.md).
+
 ## 3. PC ↔ Debug: USB and PH protocol
 
 ### USB interfaces
@@ -215,6 +217,8 @@ Rising/falling-edge capture retains `floor(count/4)` history samples. Two chaine
 | 7 | GP10 | 15 | GP20 |
 
 The SUMP stream omits actual rate, trigger position and error flags. Short captures are padded with zeros, and a trigger timeout can still return captured data. Client timing depends on how closely the requested rate matches the actual divider; receiving data alone does not prove the trigger succeeded. The interface targets libsigrok `ols` clients. The desktop has no SUMP integration.
+
+On the tested RP2040 carrier, 50 MS/s was the highest validated SUMP preset; the accepted 100 MS/s setting produced an incorrect time axis. A 15.625 MHz input passed repeated frequency/edge checks on three paths, while higher inputs were phase-dependent. See [logic frequency measurements](logic-bandwidth-validation.md) for raw-waveform validation and scope.
 
 ## 7. Host and desktop
 

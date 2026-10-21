@@ -12,7 +12,9 @@ FW = ROOT / "firmware/harness-probe"
 CONFIG = FW / "boards/pico_dualcore_config.h"
 
 
-class DualcoreBoardChecks:
+class FirmwareBoardModel:
+    extra_sources = ()
+
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
@@ -44,8 +46,10 @@ class DualcoreBoardChecks:
             "-I", str(temp), "-I", str(FW / "tests"), "-I", str(FW / "src/inc"),
             "-I", str(FW / "include"), str(FW / "src/ph_fw_target_control.c"),
             str(FW / "src/ph_fw_target_io.c"), "-I", str(FW / "boards"),
+            "-I", str(FW / "src"), "-I", str(ROOT / "third_party/nanopb"),
             str(FW / "src/ph_fw_util.c"),
-            str(FW / "tests/hardware_stub.c"), "-o", str(library)
+            str(FW / "tests/hardware_stub.c"),
+            *(str(FW / source) for source in cls.extra_sources), "-o", str(library)
         ], check=True)
         cls.lib = ctypes.CDLL(str(library))
         cls.lib.ph_fw_target_io_ready.restype = ctypes.c_bool
@@ -54,12 +58,6 @@ class DualcoreBoardChecks:
         cls.lib.mock_normalize.argtypes = [ctypes.c_uint32]
         cls.lib.mock_normalize.restype = ctypes.c_uint32
         cls.lib.mock_info.restype = ctypes.c_char_p
-        netlist = ROOT / "pcb/dualcore-netlist.enet"
-        if not netlist.exists():
-            raise unittest.SkipTest("pcb/dualcore-netlist.enet not present; skipping netlist checks")
-        cls.components = {c["props"]["Designator"]: c for c in json.loads(
-            netlist.read_text()
-        )["components"].values()}
 
     def var(self, name):
         return ctypes.c_uint.in_dll(self.lib, name)
@@ -70,6 +68,18 @@ class DualcoreBoardChecks:
     def setUp(self):
         self.lib.mock_reset()
         self.lib.ph_fw_target_io_init()
+
+
+class DualcoreBoardChecks(FirmwareBoardModel):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        netlist = ROOT / "pcb/dualcore-netlist.enet"
+        if not netlist.exists():
+            raise unittest.SkipTest("pcb/dualcore-netlist.enet not present; skipping netlist checks")
+        cls.components = {c["props"]["Designator"]: c for c in json.loads(
+            netlist.read_text()
+        )["components"].values()}
 
     def test_gpio_normalization_against_actual_series_resistor_nets(self):
         u1 = self.components["U1"]["pinInfoMap"].values()

@@ -50,35 +50,34 @@ static uint32_t le32(const uint8_t *b)
            ((uint32_t)b[3] << 24);
 }
 
-static void cdc1_write(const uint8_t *data, size_t len)
-{
-    size_t off = 0;
-    while (off < len) {
-        uint32_t n = tud_cdc_n_write(PH_FW_LA_CDC, data + off, len - off);
-        off += n;
-        if (n == 0) {
-            tight_loop_contents();
-            if (!tud_cdc_n_connected(PH_FW_LA_CDC))
-                break;
-        }
-    }
-    /* Do not flush here: flushing per ID reply would stall bulk streaming.
-     * A single 4-byte ID will be delivered when the host reads it. */
-    tud_cdc_n_write_flush(PH_FW_LA_CDC);
-}
+/* Only core 0 touches CDC. Never wait here for completion callbacks: they
+ * run in this same USB task. Keep an ID reply until the FIFO has room. */
+static uint32_t id_pending;
 
-static void sump_stream_sample(uint32_t idx)
+static void sump_stream(void)
 {
-    uint8_t word[4];
-    uint32_t s = idx < sump_actual ? ph_fw_la_sample(idx) : 0;
-    uint32_t w = 0;
-    for (uint32_t i = 0; i < PH_FW_LA_CHANNELS; ++i)
-        w |= ((s >> sump_wpin[i]) & 1u) << i;
-    word[0] = (uint8_t)w;
-    word[1] = (uint8_t)(w >> 8);
-    word[2] = (uint8_t)(w >> 16);
-    word[3] = (uint8_t)(w >> 24);
-    cdc1_write(word, 4);
+    uint8_t bytes[64];
+    uint32_t count = MIN(sump_expected - sump_stream_index,
+                         MIN(sizeof(bytes), tud_cdc_n_write_available(PH_FW_LA_CDC)) / 4);
+    if (!count)
+        return;
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t idx = sump_stream_index + i;
+        uint32_t s = idx < sump_actual ? ph_fw_la_sample(idx) : 0;
+        uint32_t w = 0;
+        for (uint32_t channel = 0; channel < PH_FW_LA_CHANNELS; ++channel)
+            w |= ((s >> sump_wpin[channel]) & 1u) << channel;
+        bytes[i * 4] = (uint8_t)w;
+        bytes[i * 4 + 1] = (uint8_t)(w >> 8);
+        bytes[i * 4 + 2] = (uint8_t)(w >> 16);
+        bytes[i * 4 + 3] = (uint8_t)(w >> 24);
+    }
+    /* Available FIFO space was reserved by this task, its only writer. */
+    uint32_t written = tud_cdc_n_write(PH_FW_LA_CDC, bytes, count * 4);
+    sump_stream_index += written / 4;
+    /* Full packets auto-flush in TinyUSB; flush a final short packet once. */
+    if (sump_stream_index == sump_expected)
+        tud_cdc_n_write_flush(PH_FW_LA_CDC);
 }
 
 static void handle_run(void)
@@ -136,8 +135,7 @@ static void dispatch(const uint8_t *c, uint8_t len)
         break;
     case 0x02: {
         /* OLS demon-core identity accepted by libsigrok's ols driver. */
-        const uint8_t id[4] = {'1', 'A', 'L', 'S'};
-        cdc1_write(id, sizeof(id));
+        ++id_pending;
         break;
     }
     case 0x04: /* metadata: unsupported, stay silent */
@@ -184,6 +182,7 @@ void ph_sump_init(void)
     sump_req = sump_cancel = sump_done = 0;
     sump_streaming = 0;
     cmd_pos = cmd_need = 0;
+    id_pending = 0;
 }
 
 void ph_sump_pump(void)
@@ -201,27 +200,26 @@ void ph_sump_pump(void)
         }
     }
 
-    /* Stream a completed capture out of the shared buffer. */
+    if (id_pending && tud_cdc_n_write_available(PH_FW_LA_CDC) >= 4) {
+        const uint8_t id[4] = {'1', 'A', 'L', 'S'};
+        if (tud_cdc_n_write(PH_FW_LA_CDC, id, sizeof(id)) == sizeof(id))
+            --id_pending;
+        tud_cdc_n_write_flush(PH_FW_LA_CDC);
+    }
+
+    /* One packet per pump bounds Core 0 work so PH and DAP stay responsive. */
     if (sump_done) {
+        __dmb();
         if (!sump_streaming) {
             sump_streaming = 1;
             sump_stream_index = 0;
         }
-        while (sump_stream_index < sump_expected) {
-            if (!tud_cdc_n_connected(PH_FW_LA_CDC)) {
-                sump_streaming = 0;
-                break;
-            }
-            if (tud_cdc_n_write_available(PH_FW_LA_CDC) >= 4)
-                sump_stream_sample(sump_stream_index++);
-            else
-                break;
-            tight_loop_contents();
-        }
-        if (sump_stream_index >= sump_expected || !sump_streaming) {
-            sump_done = 0;
+        if (tud_cdc_n_connected(PH_FW_LA_CDC))
+            sump_stream();
+        if (sump_stream_index >= sump_expected || !tud_cdc_n_connected(PH_FW_LA_CDC)) {
             sump_streaming = 0;
-            tud_cdc_n_write_flush(PH_FW_LA_CDC);
+            __dmb();
+            sump_done = 0;
         }
     }
 }
@@ -234,6 +232,7 @@ void ph_sump_worker(void)
         sump_cancel = 0;
     }
     if (sump_req && !ph_fw_la_busy() && !sump_done) {
+        __dmb();
         uint32_t count = sump_req_count, hz = sump_req_hz;
         uint8_t trigger = sump_req_trigger, pin = sump_req_pin;
         sump_req = 0;
@@ -259,4 +258,5 @@ void ph_sump_reset(void)
     sump_req = sump_cancel = sump_done = 0;
     sump_streaming = 0;
     cmd_pos = cmd_need = 0;
+    id_pending = 0;
 }

@@ -71,9 +71,6 @@
 #define ph_fw_probe_dump(format, ...) ((void)0)
 #endif
 
-/* Returns true to abort an in-progress SPI transfer after caller housekeeping. */
-typedef bool (*ph_fw_target_yield_fn)(void);
-
 enum ph_fw_led_mode {
     PH_FW_LED_OFF, /* USB suspended or not configured */
     PH_FW_LED_IDLE, /* USB ready, no SWD target seen yet */
@@ -114,8 +111,11 @@ uint16_t ph_fw_target_work_mv(void);
  * so it can never briefly drive an unpowered Work pin. */
 void ph_fw_target_gpio_function(uint pin, gpio_function_t function);
 
-/* DMA-driven SPI transaction.  Runs on the Work side; yields while busy. */
-bool ph_fw_target_spi_transfer(const uint8_t *tx, uint8_t *rx, uint16_t length, ph_fw_target_yield_fn yield);
+/* Core 1 owns SPI and the supplied buffers until poll completes or cancel.
+ * poll: 0 = pending, 1 = complete, -1 = failed/idle. Neither call waits. */
+bool ph_fw_target_spi_start(const uint8_t *tx, uint8_t *rx, uint16_t length);
+int ph_fw_target_spi_poll(void);
+void ph_fw_target_spi_cancel(void);
 
 /* INA237 power monitor readout: shunt/bus voltage, current and power (uV/uA/uW). */
 bool ph_fw_target_power_measure(int32_t values[4]);

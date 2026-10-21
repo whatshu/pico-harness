@@ -62,6 +62,8 @@ Debug 固件支持 `pico_dualcore_pico`（RP2040 Pico）和 `pico_dualcore`（RP
 
 USB 重置或卸载会清理 PH、Console、Bulk 和 SUMP 会话状态。Debug 自身升级通过 `DebugBootsel` 请求，在响应发送后进入 ROM BOOTSEL。
 
+SPI DMA 通过 start/poll/cancel 跨 worker 迭代运行，Core 1 持有块缓冲直到完成或取消。Bulk 重置由 Core 1 确认后才恢复 USB 接收和新事务。SUMP 独占采样完成轮询；Core 0 每次 pump 最多排入 64 字节样本，只为最后的短包显式 flush。实测见[固件性能验证](probe-core-performance.md)。
+
 ## 3. PC ↔ Debug：USB 与 PH 协议
 
 ### USB 接口
@@ -215,6 +217,8 @@ target_link_libraries(my_app PRIVATE pico_harness)
 | 7 | GP10 | 15 | GP20 |
 
 SUMP 流不传递引擎的实际速率、触发位置和错误标记；采样不足请求长度时补零，触发超时也可能输出已采集的数据。客户端时间轴取决于请求速率与实际分频的匹配，不能仅凭收到数据判定触发成功。该接口面向 libsigrok `ols` 客户端，桌面端尚未接入 SUMP。
+
+当前 RP2040 载板实测通过的最高 SUMP 档为 50 MS/s；可接受的 100 MS/s 档存在时间轴失真。15.625 MHz 输入在三条通路的重复频率/边沿检查中通过，更高输入受采样相位影响而不可靠。原始波形验证与范围见[逻辑分析频率实测](logic-bandwidth-validation.md)。
 
 ## 7. 主机与桌面端
 

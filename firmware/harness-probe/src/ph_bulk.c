@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: MIT */
+#include <string.h>
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
 #include "tusb.h"
@@ -18,6 +19,7 @@ static volatile uint32_t rx_tail; /* core1 consumer */
 /* Transaction state: owned by core1, read (volatile) by core0 so the RX pump
  * stops accepting stray bytes unless a transaction expects them. */
 static volatile uint8_t tx_active;
+static volatile bool reset_pending;
 static uint8_t tx_route;
 static uint32_t tx_len, tx_crc, tx_started_us;
 
@@ -32,7 +34,10 @@ static uint32_t tx_len, tx_crc, tx_started_us;
 #define PH_WORK_SPI_WAIT_ACK 2
 #define PH_WORK_SPI_TRANSFER 3
 #define PH_WORK_SPI_WAIT_CRC 4
+#define PH_WORK_SPI_WAIT_DMA 5
 static uint8_t ws_state;
+static bool block_crc_ready;
+static uint8_t block_crc[2];
 static uint8_t block_tx[PICO_HARNESS_BLOCK];
 static uint8_t block_rx[PICO_HARNESS_BLOCK];
 static uint16_t block_len;
@@ -50,16 +55,17 @@ void ph_bulk_init(void)
     rx_head = rx_tail = 0;
     tx_active = 0;
     ws_state = PH_WORK_SPI_IDLE;
+    reset_pending = false;
 }
 
 bool ph_bulk_busy(void)
 {
-    return tx_active != 0;
+    return tx_active != 0 || reset_pending;
 }
 
 bool ph_bulk_rx_begin(uint32_t route, uint32_t length, uint32_t crc)
 {
-    if (tx_active || length == 0)
+    if (tx_active || reset_pending || length == 0)
         return false;
     if (route != PH_ROUTE_DEBUG && route != PH_ROUTE_WORK_SPI)
         return false;
@@ -86,8 +92,9 @@ bool ph_bulk_rx_begin(uint32_t route, uint32_t length, uint32_t crc)
 
 void ph_bulk_pump_rx(void)
 {
-    if (!tx_active)
+    if (reset_pending || !tx_active)
         return;
+    __dmb();
     uint32_t space = PH_BULK_RING - (rx_head - rx_tail);
     if (!space)
         return;
@@ -102,46 +109,48 @@ void ph_bulk_pump_rx(void)
     }
 }
 
-/* Byte-wise CRC-32C (Castagnoli) update over a contiguous region. */
-static uint32_t crc32c_update(uint32_t crc, const uint8_t *data, uint32_t count)
-{
-    for (uint32_t i = 0; i < count; ++i) {
-        crc ^= data[i];
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ (0x82f63b78u & -(int32_t)(crc & 1));
-    }
-    return crc;
-}
-
 static uint32_t crc32c_ring(uint32_t offset, uint32_t count)
 {
-    uint32_t crc = ~0u;
-    for (uint32_t i = 0; i < count; ++i) {
-        crc ^= rx_ring[(offset + i) % PH_BULK_RING];
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc >> 1) ^ (0x82f63b78u & -(int32_t)(crc & 1));
-    }
+    offset %= PH_BULK_RING;
+    uint32_t first = MIN(count, PH_BULK_RING - offset);
+    uint32_t crc = ph_fw_crc32c_update(~0u, rx_ring + offset, first);
+    crc = ph_fw_crc32c_update(crc, rx_ring, count - first);
     return ~crc;
-}
-
-static bool bulk_spi_yield(void)
-{
-    return false;
 }
 
 /* Copy `want` bytes from the RX ring into `dst` and advance the tail. Call
  * only when at least `want` bytes are produced. */
 static void ring_pull(uint8_t *dst, uint32_t want)
 {
-    for (uint32_t i = 0; i < want; ++i)
-        dst[i] = rx_ring[(rx_tail + i) % PH_BULK_RING];
+    __dmb();
+    uint32_t offset = rx_tail % PH_BULK_RING;
+    uint32_t first = MIN(want, PH_BULK_RING - offset);
+    memcpy(dst, rx_ring + offset, first);
+    memcpy(dst + first, rx_ring, want - first);
+    __dmb();
     rx_tail += want;
 }
 
 void ph_bulk_worker(void)
 {
-    if (!tx_active)
+    if (reset_pending) {
+        /* Core 0 has stopped pumping. Only the DMA owner may release the
+         * block buffers and reset the producer/consumer positions. */
+        __dmb();
+        ph_fw_target_spi_cancel();
+        rx_head = rx_tail = 0;
+        tx_active = 0;
+        ws_state = PH_WORK_SPI_IDLE;
+        __dmb();
+        reset_pending = false;
         return;
+    }
+    if (!tx_active) {
+        /* USB reset may have discarded a transaction. Stop its DMA on the
+         * owning core before another worker iteration can reuse buffers. */
+        ph_fw_target_spi_cancel();
+        return;
+    }
 
     if (tx_route == PH_ROUTE_DEBUG) {
         uint32_t produced = rx_head - rx_tail;
@@ -150,6 +159,7 @@ void ph_bulk_worker(void)
                 ph_bulk_done(false, 0);
             return;
         }
+        __dmb();
         uint32_t crc = crc32c_ring(rx_tail, tx_len);
         ph_bulk_done(crc == tx_crc, crc);
         rx_tail += tx_len;
@@ -167,7 +177,8 @@ void ph_bulk_worker(void)
             return; /* wait for the block to arrive */
         }
         ring_pull(block_tx, block_len);
-        crc_accum = crc32c_update(crc_accum, block_tx, block_len);
+        block_crc_ready = false;
+        crc_accum = ph_fw_crc32c_update(crc_accum, block_tx, block_len);
         uint8_t le[2] = {(uint8_t)block_len, (uint8_t)(block_len >> 8)};
         ph_console_uart_send(PH_BULK_TX_PREPARE, le, 2);
         ws_state = PH_WORK_SPI_WAIT_ACK;
@@ -179,13 +190,28 @@ void ph_bulk_worker(void)
             ph_bulk_done(false, 0);
         return; /* ph_bulk_on_uart will move us to TRANSFER */
     case PH_WORK_SPI_TRANSFER:
-        if (!ph_fw_target_spi_transfer(block_tx, block_rx, block_len, bulk_spi_yield)) {
+        if (!ph_fw_target_spi_start(block_tx, block_rx, block_len)) {
+            ph_bulk_done(false, 0);
+            return;
+        }
+        ws_state = PH_WORK_SPI_WAIT_DMA;
+        return;
+    case PH_WORK_SPI_WAIT_DMA: {
+        int result = ph_fw_target_spi_poll();
+        if (!result)
+            return;
+        if (result < 0) {
             ph_bulk_done(false, 0);
             return;
         }
         ws_state = PH_WORK_SPI_WAIT_CRC;
         ws_t0 = time_us_32();
+        /* UART is serviced before this FSM. Work may already have replied
+         * between DMA completion and our next poll. Keep that CRC until now. */
+        if (block_crc_ready)
+            ph_bulk_on_uart(PH_BULK_CRC, 0, block_crc, sizeof(block_crc));
         return;
+    }
     case PH_WORK_SPI_WAIT_CRC:
         if (time_us_32() - ws_t0 > 500000u)
             ph_bulk_done(false, 0);
@@ -198,12 +224,15 @@ void ph_bulk_worker(void)
 void ph_bulk_on_uart(uint8_t kind, uint16_t seq, const uint8_t *payload, size_t size)
 {
     (void)seq;
-    if (!tx_active || tx_route != PH_ROUTE_WORK_SPI)
+    if (reset_pending || !tx_active || tx_route != PH_ROUTE_WORK_SPI)
         return;
     if (kind == PH_BULK_TX_ACK && ws_state == PH_WORK_SPI_WAIT_ACK && size == 2) {
         uint16_t announced = (uint16_t)(payload[0] | (payload[1] << 8));
         if (announced == block_len)
             ws_state = PH_WORK_SPI_TRANSFER;
+    } else if (kind == PH_BULK_CRC && ws_state == PH_WORK_SPI_WAIT_DMA && size == 2) {
+        memcpy(block_crc, payload, sizeof(block_crc));
+        block_crc_ready = true;
     } else if (kind == PH_BULK_CRC && ws_state == PH_WORK_SPI_WAIT_CRC && size == 2) {
         uint16_t got = (uint16_t)(payload[0] | (payload[1] << 8));
         if (got != ph_fw_crc16_ccitt(block_tx, block_len)) {
@@ -241,7 +270,7 @@ void ph_bulk_flush_tx(void)
 
 void ph_bulk_reset(void)
 {
-    rx_head = rx_tail = 0;
-    tx_active = 0;
-    ws_state = PH_WORK_SPI_IDLE;
+    /* Called by Core 0 on USB reset, between USB pump iterations. */
+    __dmb();
+    reset_pending = true;
 }

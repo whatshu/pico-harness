@@ -54,11 +54,11 @@ pub fn show(ui: &mut egui::Ui, d: &mut Device, l: &I18n, now: f64, notice: &mut 
         }
         ui.label(l.tr("Sample rate"));
         egui::ComboBox::from_id_salt("capture-rate")
-            .selected_text(crate::logic::frequency_label(s.rate))
+            .selected_text(crate::logic::sample_rate_label(s.rate))
             .show_ui(ui, |ui| {
                 for rate in crate::logic::SAMPLE_RATES {
                     if ui
-                        .selectable_value(&mut s.rate, rate, crate::logic::frequency_label(rate))
+                        .selectable_value(&mut s.rate, rate, crate::logic::sample_rate_label(rate))
                         .changed()
                     {
                         s.update_sampling();

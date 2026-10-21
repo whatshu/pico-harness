@@ -6,23 +6,23 @@ pub const PINS: [u8; 16] = [
     5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 26, 27, 28,
 ];
 pub const DEFAULT_PINS: [u8; 7] = [5, 12, 13, 18, 19, 20, 21];
-pub const SAMPLE_RATES: [u32; 7] = [
-    100_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000,
+pub const SAMPLE_RATES: [u32; 8] = [
+    100_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000, 20_000_000, 50_000_000,
 ];
 pub const MAX_SAMPLES: usize = 32768;
 
-pub fn frequency_label(hz: u32) -> String {
-    for (scale, unit) in [(1_000_000_000, "GHz"), (1_000_000, "MHz"), (1_000, "kHz")] {
-        if hz >= scale {
-            let value = hz as f64 / scale as f64;
-            return if hz % scale == 0 {
+pub fn sample_rate_label(rate: u32) -> String {
+    for (scale, unit) in [(1_000_000_000, "GS/s"), (1_000_000, "MS/s"), (1_000, "kS/s")] {
+        if rate >= scale {
+            let value = rate as f64 / scale as f64;
+            return if rate % scale == 0 {
                 format!("{value:.0} {unit}")
             } else {
                 format!("{value:.3} {unit}")
             };
         }
     }
-    format!("{hz} Hz")
+    format!("{rate} S/s")
 }
 #[derive(Clone)]
 pub struct Channel {
@@ -643,9 +643,9 @@ mod tests {
         logic.update_sampling();
         assert_eq!(logic.rate, 2_000_000);
         assert_eq!(logic.count, MAX_SAMPLES);
-        assert_eq!(frequency_label(100_000), "100 kHz");
-        assert_eq!(frequency_label(2_000_000), "2 MHz");
-        assert_eq!(frequency_label(1_000_000_000), "1 GHz");
+        assert_eq!(sample_rate_label(100_000), "100 kS/s");
+        assert_eq!(sample_rate_label(2_000_000), "2 MS/s");
+        assert_eq!(sample_rate_label(1_000_000_000), "1 GS/s");
     }
     #[test]
     fn fixture_decodes() {

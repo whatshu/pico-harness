@@ -10,6 +10,7 @@
 
 ```sh
 PYTHONPATH=host python3 -m unittest discover -s host/tests -p test_ph_proto.py
+PYTHONPATH=host python3 -m unittest discover -s host/tests -p test_probe_transport.py
 python3 firmware/harness-target/test/run.py
 cargo build --manifest-path ph-bridge/Cargo.toml --bins
 PYTHONPATH=host python3 -m unittest discover -s host/tests
@@ -87,6 +88,10 @@ PYTHONPATH=host python3 host/tools/check_bridge.py --serial YOUR_SERIAL \
 第三个慢订阅者是否丢失保留历史。`--console-echo` 则需要专用的字节回显夹具。
 这些 Work 选项会临时上电并恢复初始电源状态，不烧录固件。
 实际结果和恢复测试范围见 [Linux 实体硬件记录](bridge-hardware-validation.md)。
+
+对比 Debug 固件时，先停止 `phd`，再用[原始 USB 核心测量工具](../../host/tools/check_probe_core.py)。
+工具记录延迟原始样本与 CRC 结果，可选测量 Work SPI 期间的控制延迟、SUMP 采样回传，结束恢复 Work 电源。
+复现命令和夹具限制见[固件性能验证](probe-core-performance.md)。
 
 设置 `PHD_ADDR` / `PHD_TOKEN_FILE` 可验证远程 daemon。桌面硬件测试同样使用 IPC。daemon 内部硬件夹具位于 `ph-bridge/device`；仅在停止 phd 和其他设备使用者后运行：
 
