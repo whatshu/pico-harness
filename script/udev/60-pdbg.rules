@@ -1,0 +1,22 @@
+# PicoHarness: PH probe and ROM BOOTSEL USB permissions for picotool.
+#
+# Install (Debian/Ubuntu; the group must exist and the user must be a member):
+#   sudo cp script/udev/60-pdbg.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+#
+# Other distributions: replace GROUP="plugdev" with your desktop-access group
+# (e.g. "uaccess" TAG on systemd-logind systems).
+
+# Debug core application firmware: PH Terminal/Bulk + CMSIS-DAP v2
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000c", MODE="0660", GROUP="plugdev"
+
+# CDC control/logic device nodes need access independently of the USB handle.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000c", MODE="0660", GROUP="plugdev"
+
+# ROM BOOTSEL bootloader: RP2040 (Pico) and RP2350 (Pico 2)
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="0003", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000f", MODE="0660", GROUP="plugdev"
+
+# BOOTSEL mass-storage volumes (drag-and-drop UF2 flashing)
+SUBSYSTEM=="block", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="0003", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="block", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000f", MODE="0660", GROUP="plugdev"

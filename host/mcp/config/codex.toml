@@ -1,0 +1,8 @@
+[mcp_servers.picoharness]
+command = "ph-mcp"
+args = []
+startup_timeout_sec = 10
+tool_timeout_sec = 60
+
+[mcp_servers.picoharness.env]
+PHD_ADDR = "127.0.0.1:44840"

@@ -1,0 +1,11 @@
+*.pdf binary
+*.zip binary
+*.epro binary
+*.jpg binary
+*.png binary
+*.step binary
+*.wrl binary
+
+# Preserve the imported upstream snapshot byte-for-byte. Its historical CMSIS
+# sources contain trailing whitespace that is not ours to rewrite.
+firmware/harness-probe/** whitespace=-trailing-space,-space-before-tab

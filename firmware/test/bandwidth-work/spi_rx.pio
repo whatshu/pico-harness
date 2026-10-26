@@ -1,0 +1,13 @@
+; SPDX-License-Identifier: MIT
+; Work GP18=SCK, GP20=MOSI, GP21=CS. Mode 0 receive-only fixture.
+; Each byte starts with CS low. The current master inserts a gap between bytes.
+.program benchmark_spi_rx
+.wrap_target
+    wait 0 gpio 21
+    set x, 7
+bitloop:
+    wait 1 gpio 18
+    in pins, 1
+    wait 0 gpio 18
+    jmp x-- bitloop
+.wrap

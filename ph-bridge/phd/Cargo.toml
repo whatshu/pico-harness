@@ -1,0 +1,28 @@
+[package]
+name = "phd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ph-bridge = { path = "../bridge" }
+ph-device = { path = "../device" }
+ph-protocol = { path = "../protocol" }
+ph-client = { path = "../client" }
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+base64.workspace = true
+prost = "0.13"
+rand = "0.8"
+ctrlc = { version = "3", features = ["termination"] }
+tempfile = "3"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.31", features = ["term", "fs", "poll"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8.1"

@@ -1,0 +1,190 @@
+// picoharness proto schema
+//
+// PH protocol: messages exchanged between the host (PH Bridge) and the Debug
+// core over the CDC "PH Terminal" interface. Framing is length-delimited
+// protobuf: <varint length><PhMessage bytes> (Nanopb pb_encode_delimited /
+// prost encode_length_delimited).
+//
+// The bulk data plane (vendor interface "PH Terminal Bulk") carries raw
+// payload bytes only; this schema covers only control/coordination messages.
+
+syntax = "proto3";
+package picoharness.v1;
+
+import "nanopb.proto";
+
+// Nanopb-specific field sizing lives in the `(nanopb)` annotations below;
+// `third_party/nanopb` carries the nanopb runtime and ph-bridge/proto/nanopb.proto the
+// option definitions, so prost/micromsg and other hosts can compile this
+// schema without the nanopb generator installed.
+
+// ---------------------------------------------------------------------------
+// Runtime status codes, echoed in every response.
+// ---------------------------------------------------------------------------
+enum Status {
+  OK        = 0;
+  ERR_FRAME = 1;  // framing / decode error
+  ERR_CMD   = 2;  // unknown message
+  ERR_ARG   = 3;  // bad argument
+  ERR_BUSY  = 4;  // a bulk transaction is already running
+  ERR_CRC   = 5;  // bulk payload CRC mismatch
+  ERR_ROUTE = 6;  // unknown bulk route
+  ERR_NOTREADY = 7; // target / peripheral not ready (e.g. work unpowered)
+}
+
+// ---------------------------------------------------------------------------
+// control: merged from the former PDBG command set
+// ---------------------------------------------------------------------------
+message GetInfo {
+  string info = 1 [(nanopb).max_size = 64];
+}
+
+message GetStatus {
+  bool   power_enabled = 1;
+  bool   power_good    = 2;
+  bool   ina_alert     = 3;
+  bool   work_fault    = 4;
+  uint32 vbus_mv       = 5;
+}
+
+message PowerSet {
+  bool enabled = 1;
+}
+
+message ResetPulse {
+  uint32 duration_ms = 1;  // 1..1000
+}
+
+message BootselSet {
+  bool asserted = 1;
+}
+
+message EnterBootsel {}
+
+message Measure {
+  int32 shunt_uv  = 1;  // INA237 shunt voltage uV
+  int32 vbus_uv   = 2;  // rail bus voltage uV
+  int32 current_ua = 3; // current uA
+  int32 power_uw  = 4;  // power uW
+}
+
+message GpioRead {
+  uint32 mask = 1;  // work-pin bit map
+}
+
+message GpioDiag {
+  uint32 pin      = 1;
+  bool   level    = 2;
+  bool   output   = 3;
+  uint32 function = 4;
+  bool   pull_up  = 5;
+  bool   pull_down = 6;
+}
+
+message DebugBootsel {}
+
+// ---------------------------------------------------------------------------
+// terminal: console / configuration
+// ---------------------------------------------------------------------------
+message ConsoleTx {
+  bytes data = 1 [(nanopb).max_size = 128];  // host -> Debug -> Work
+}
+
+message ConsoleData {
+  bytes data = 1 [(nanopb).max_size = 128];  // Debug -> host (short output)
+}
+
+// Raw bytes at the Debug UART boundary. TX means accepted by its UART queue,
+// RX means read from its DMA buffer; timestamps are observation times, not edges.
+message UartTrace {
+  bytes data = 1 [(nanopb).max_size = 128];
+  bool tx = 2;
+  uint32 baud = 3;
+  uint64 timestamp_us = 4;
+  uint32 dropped = 5; // cumulative bytes omitted due to host backpressure
+}
+
+message TermConfig {
+  uint32 baud       = 1;
+  uint32 data_bits  = 2;
+  uint32 stop_bits  = 3;
+  uint32 parity     = 4;    // 0 none, 1 odd, 2 even
+  uint32 actual_baud = 5;   // response: applied baud rate
+}
+
+// Console bridge mode, as decided by the Debug core's Hello discovery.
+enum ConsoleMode {
+  CONSOLE_PLAIN   = 0;  // Work runs a plain UART console
+  CONSOLE_HARNESS = 1;  // Work announced pico_harness; console Tx is framed
+}
+
+message TermStatus {
+  uint32 rx_available = 1;   // bytes waiting on the Work UART
+  uint32 tx_space     = 2;
+  uint32 overruns     = 3;
+  ConsoleMode mode    = 4;   // console bridge mode
+  uint32 actual_baud  = 5;   // applied Work UART baud rate
+}
+
+// ---------------------------------------------------------------------------
+// bulk data-plane coordination (payload rides the vendor bulk interface, raw)
+// ---------------------------------------------------------------------------
+enum Route {
+  ROUTE_DEBUG   = 0;  // payload stays on the Debug core (reserved)
+  ROUTE_WORK_SPI = 1; // payload forwarded to Work core over SPI
+}
+
+message BulkTxBegin {
+  Route  route   = 1;
+  uint32 length  = 2;  // expected payload byte count
+  uint32 crc32c  = 3;  // CRC-32C (Castagnoli) of the expected payload
+}
+
+message BulkTxDone {
+  bool   ok       = 1;
+  uint32 crc_recv = 2;  // CRC-32C computed by Debug over the received payload
+}
+
+message BulkRxAvail {
+  uint32 length = 1;  // Debug -> host: bytes pending in the read direction
+}
+
+message BulkRxBegin {}
+
+message BulkRxDone {
+  bool ok = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Envelope
+// ---------------------------------------------------------------------------
+message PhMessage {
+  uint32 seq    = 1;   // request/response echo; 0 for unsolicited events
+  Status status = 2;   // status in responses; ignored in requests
+
+  oneof body {
+    // control
+    GetInfo      get_info        = 16;
+    GetStatus    get_status      = 17;
+    PowerSet     power_set       = 18;
+    ResetPulse   reset_pulse     = 19;
+    BootselSet   bootsel_set     = 20;
+    EnterBootsel enter_bootsel   = 21;
+    Measure      measure         = 22;
+    GpioRead     gpio_read       = 23;
+    GpioDiag     gpio_diag       = 24;
+    DebugBootsel debug_bootsel   = 25;
+    // terminal
+    ConsoleTx    console_tx      = 32;
+    ConsoleData  console_data    = 33;
+    TermConfig   term_config     = 34;
+    TermStatus   term_status     = 35;
+    UartTrace    uart_trace      = 36;
+    // bulk coordination
+    BulkTxBegin  bulk_tx_begin   = 40;
+    BulkTxDone   bulk_tx_done    = 41;
+    BulkRxAvail  bulk_rx_avail   = 42;
+    BulkRxBegin  bulk_rx_begin   = 43;
+    BulkRxDone   bulk_rx_done    = 44;
+  }
+}

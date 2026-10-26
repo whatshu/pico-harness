@@ -1,0 +1,43 @@
+# KiCad transient and local state
+*.kicad_prl
+*.lck
+~*.kicad_*
+**/.history/
+**/.cache/
+*-backups/
+
+# Build and release output
+/BUILD/
+/RELEASE/
+!/RELEASE/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Reproducible MarkItDown output (local conversions only).
+/doc/markitdown/**
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+.serial_mcp
+
+# Local clangd analysis glue: firmware/harness-probe/build -> /BUILD/analysis/<board>
+firmware/harness-probe/build
+desktop/target/
+/ph-bridge/target/
+/host/mcp/target/
+
+# Local workspace configuration and all standalone firmware builds
+/.aws/
+/.codex/
+/.agents/
+firmware/**/build/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
